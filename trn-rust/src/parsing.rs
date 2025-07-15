@@ -407,7 +407,7 @@ mod tests {
 
     #[test]
     fn test_url_parsing() {
-        let url = "trn://user/alice/tool/openapi//getUserById/v1.0/";
+        let url = "trn://user/alice/tool/openapi//getUserById/v1.0//";
         let trn = parse_trn_from_url(url).unwrap();
         assert_eq!(trn.platform(), "user");
         assert_eq!(trn.scope(), Some("alice"));
