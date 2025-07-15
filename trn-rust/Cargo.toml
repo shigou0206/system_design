@@ -1,0 +1,120 @@
+[package]
+name = "trn-rust"
+version = "0.1.0"
+authors = ["shigou0206 <shigou0206@gmail.com>"]
+edition = "2021"
+description = "High-performance Rust library for Tool Resource Names (TRN)"
+documentation = "https://docs.rs/trn-rust"
+homepage = "https://github.com/shigou0206/trn-rust"
+repository = "https://github.com/shigou0206/trn-rust"
+keywords = ["trn", "tool", "resource", "name", "identifier", "ai", "agent", "platform"]
+categories = ["parsing", "web-programming", "development-tools"]
+readme = "README.md"
+exclude = [
+    "benches/*",
+    "tests/*",
+    "examples/*",
+    ".github/*",
+    "scripts/*"
+]
+
+[lib]
+name = "trn_rust"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "trn"
+required-features = ["cli"]
+
+[dependencies]
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Parsing
+nom = "7.1"
+regex = "1.10"
+
+# Caching and performance
+once_cell = "1.19"
+dashmap = "5.5"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = { version = "0.9", optional = true }
+toml = { version = "0.8", optional = true }
+
+# URL handling
+url = "2.4"
+percent-encoding = "2.3"
+
+# String utilities
+unicode-normalization = "0.1"
+
+# CLI support (optional)
+clap = { version = "4.4", features = ["derive"], optional = true }
+
+# C FFI (optional)
+libc = { version = "0.2", optional = true }
+
+# Python bindings (optional)
+pyo3 = { version = "0.20", features = ["extension-module"], optional = true }
+
+# Async support (optional)
+tokio = { version = "1.0", features = ["full"], optional = true }
+
+[dev-dependencies]
+# Testing
+criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1.4"
+rstest = "0.18"
+
+# Fuzzing
+arbitrary = { version = "1.3", features = ["derive"] }
+
+[features]
+default = []
+
+# CLI tools
+cli = ["dep:clap", "dep:serde_yaml", "dep:toml"]
+
+# C Foreign Function Interface
+ffi = ["dep:libc"]
+
+# Python bindings
+python = ["dep:pyo3"]
+
+# Async support
+async = ["dep:tokio"]
+
+# All features for development
+full = ["cli", "ffi", "python", "async"]
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.bench]
+debug = true
+
+[[bench]]
+name = "parsing"
+harness = false
+required-features = []
+
+[[bench]]
+name = "validation"
+harness = false
+required-features = []
+
+[[bench]]
+name = "url_conversion"
+harness = false
+required-features = []
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"] 
