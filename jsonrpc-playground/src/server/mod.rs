@@ -14,6 +14,9 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 use tracing::{info, error, debug};
 
+// 使用 jsonrpc-rust 库的类型定义
+use jsonrpc_rust::prelude::*;
+
 use crate::services::DemoServices;
 
 /// 应用全局状态
@@ -28,7 +31,7 @@ pub struct AppState {
 }
 
 /// 会话信息
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct SessionInfo {
     pub id: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -112,53 +115,46 @@ impl AppState {
 /// HTTP JsonRPC 请求处理器
 pub async fn jsonrpc_handler(
     State(state): State<AppState>,
-    Json(request): Json<Value>,
+    Json(request_value): Json<Value>,
 ) -> Result<ResponseJson<Value>, StatusCode> {
     let start_time = std::time::Instant::now();
     
-    debug!("收到 JsonRPC 请求: {}", serde_json::to_string_pretty(&request).unwrap_or_default());
+    debug!("收到 JsonRPC 请求: {}", serde_json::to_string_pretty(&request_value).unwrap_or_default());
     
-    // 解析请求
-    let response = match process_jsonrpc_request(&state, request).await {
-        Ok(resp) => {
-            let duration = start_time.elapsed().as_millis() as u64;
-            state.record_request(true, duration).await;
-            resp
-        }
+    // 解析为 JsonRpcRequest
+    let request: JsonRpcRequest = match serde_json::from_value(request_value) {
+        Ok(req) => req,
         Err(err) => {
-            error!("JsonRPC 请求处理错误: {}", err);
-            let duration = start_time.elapsed().as_millis() as u64;
-            state.record_request(false, duration).await;
-            
-            json!({
-                "jsonrpc": "2.0",
-                "error": {
-                    "code": -32603,
-                    "message": "Internal error",
-                    "data": err.to_string()
-                },
-                "id": null
-            })
+            error!("请求解析错误: {}", err);
+            let error_response = JsonRpcResponse::error(
+                serde_json::Value::Null,
+                JsonRpcError::parse_error("Invalid JSON-RPC request format")
+            );
+            return Ok(ResponseJson(serde_json::to_value(error_response).unwrap()));
         }
     };
     
-    debug!("返回 JsonRPC 响应: {}", serde_json::to_string_pretty(&response).unwrap_or_default());
+    // 处理请求
+    let response = process_jsonrpc_request(&state, request).await;
+    let duration = start_time.elapsed().as_millis() as u64;
     
-    Ok(ResponseJson(response))
+    // 记录统计
+    state.record_request(response.is_success(), duration).await;
+    
+    debug!("返回 JsonRPC 响应: {:?}", response);
+    
+    let response_value = serde_json::to_value(response).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(ResponseJson(response_value))
 }
 
 /// 处理JsonRPC请求
 async fn process_jsonrpc_request(
     state: &AppState,
-    request: Value,
-) -> anyhow::Result<Value> {
-    // 验证JsonRPC格式
-    let method = request.get("method")
-        .and_then(|m| m.as_str())
-        .ok_or_else(|| anyhow::anyhow!("Missing method field"))?;
-    
-    let params = request.get("params").cloned().unwrap_or(Value::Null);
-    let id = request.get("id").cloned().unwrap_or(Value::Null);
+    request: JsonRpcRequest,
+) -> JsonRpcResponse {
+    let method = request.method();
+    let params = request.params.clone().unwrap_or(Value::Null);
+    let request_id = request.id().cloned().unwrap_or(Value::Null);
     
     info!("处理方法: {} with params: {}", method, params);
     
@@ -184,13 +180,19 @@ async fn process_jsonrpc_request(
         "stream.chat" => state.services.stream_chat_info().await,
         
         _ => Err(anyhow::anyhow!("Unknown method: {}", method))
-    }?;
+    };
     
-    Ok(json!({
-        "jsonrpc": "2.0",
-        "result": result,
-        "id": id
-    }))
+    // 返回适当的响应
+    match result {
+        Ok(result_value) => JsonRpcResponse::success(request_id, result_value),
+        Err(err) => {
+            error!("方法执行错误: {}", err);
+            JsonRpcResponse::error(
+                request_id,
+                JsonRpcError::internal_error(&format!("Method execution failed: {}", err))
+            )
+        }
+    }
 }
 
 /// 获取系统统计信息
@@ -202,48 +204,35 @@ async fn get_system_stats(state: &AppState) -> anyhow::Result<Value> {
         "total_requests": stats.total_requests,
         "successful_requests": stats.successful_requests,
         "failed_requests": stats.failed_requests,
+        "success_rate": if stats.total_requests > 0 {
+            stats.successful_requests as f64 / stats.total_requests as f64 * 100.0
+        } else {
+            0.0
+        },
         "average_response_time_ms": stats.average_response_time_ms,
         "active_sessions": session_count,
-        "uptime_seconds": std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
+        "timestamp": chrono::Utc::now().to_rfc3339()
     }))
 }
 
 /// 获取活跃会话信息
 async fn get_active_sessions(state: &AppState) -> anyhow::Result<Value> {
     let sessions = state.sessions.read().await;
-    let session_list: Vec<Value> = sessions.values()
-        .map(|session| json!({
-            "id": session.id,
-            "created_at": session.created_at,
-            "last_activity": session.last_activity,
-            "request_count": session.request_count
-        }))
-        .collect();
+    let session_list: Vec<_> = sessions.values().cloned().collect();
     
     Ok(json!({
-        "count": sessions.len(),
+        "count": session_list.len(),
         "sessions": session_list
     }))
 }
 
 /// 健康检查处理器
-pub async fn health_handler(
-    State(state): State<AppState>,
-) -> ResponseJson<Value> {
-    let stats = state.stats.read().await.clone();
-    
+pub async fn health_handler(State(_state): State<AppState>) -> ResponseJson<Value> {
     ResponseJson(json!({
-        "status": "healthy",
-        "timestamp": chrono::Utc::now(),
+        "status": "ok",
+        "service": "JsonRPC Playground",
         "version": env!("CARGO_PKG_VERSION"),
-        "requests_handled": stats.total_requests,
-        "success_rate": if stats.total_requests > 0 {
-            stats.successful_requests as f64 / stats.total_requests as f64 * 100.0
-        } else {
-            100.0
-        }
+        "jsonrpc_version": jsonrpc_rust::JSONRPC_VERSION,
+        "timestamp": chrono::Utc::now().to_rfc3339()
     }))
 } 
