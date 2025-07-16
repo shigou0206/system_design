@@ -14,8 +14,7 @@ use url::Url;
 use crate::core::error::{Error, Result};
 use crate::core::traits::{Transport, Connection};
 use super::abstraction::{
-    TransportLayer, TransportConfig, JsonRpcMessage, ConnectionInfo, 
-    TimeoutConfig, RetryConfig, ConnectionLimits,
+    TransportConfig, TimeoutConfig, RetryConfig, ConnectionLimits,
 };
 use super::{Protocol, tcp::TcpConfig, mock::MockConfig};
 
@@ -60,7 +59,7 @@ impl std::fmt::Display for TransportType {
 impl std::str::FromStr for TransportType {
     type Err = String;
     
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "tcp" => Ok(TransportType::Tcp),
             "websocket" | "ws" => Ok(TransportType::WebSocket),
@@ -193,52 +192,56 @@ impl TransportRegistry {
         Self::new(RegistryConfig::default())
     }
     
-    /// Unregister a transport factory
-    pub async fn unregister_factory(&self, transport_type: &TransportType) -> Result<bool> {
-        let mut factories = self.factories.write().await;
-        let removed = factories.remove(transport_type).is_some();
-        
-        if removed {
-            let mut stats = self.stats.write().await;
-            stats.registered_types = factories.len();
-            stats.usage_counts.remove(transport_type);
-        }
-        
-        Ok(removed)
-    }
-    
-    /// Get list of registered transport types
+    /// Get list of supported transport types
     pub async fn list_transport_types(&self) -> Vec<TransportType> {
-        let factories = self.factories.read().await;
-        factories.keys().cloned().collect()
+        vec![
+            TransportType::Tcp,
+            TransportType::Mock,
+            // Add more as they become available
+        ]
     }
     
-    /// Check if a transport type is registered
-    pub async fn is_registered(&self, transport_type: &TransportType) -> bool {
-        let factories = self.factories.read().await;
-        factories.contains_key(transport_type)
+    /// Check if a transport type is supported
+    pub async fn is_supported(&self, transport_type: &TransportType) -> bool {
+        matches!(transport_type, TransportType::Tcp | TransportType::Mock)
     }
     
     /// Create a transport instance by type
     pub async fn create_transport(&self, transport_type: TransportType, config: Option<serde_json::Value>) -> Result<Box<dyn Transport>> {
-        let factories = self.factories.read().await;
-        let factory = factories.get(&transport_type)
-            .ok_or_else(|| Error::Configuration {
-                message: format!("Transport type {} not registered", transport_type),
+        match transport_type {
+            TransportType::Tcp => {
+                let tcp_config = if let Some(config) = config {
+                    serde_json::from_value(config)
+                        .map_err(|e| Error::Configuration {
+                            message: format!("Invalid TCP config: {}", e),
+                            source: Some(Box::new(e)),
+                        })?
+                } else {
+                    crate::transport::tcp::TcpConfig::default()
+                };
+                
+                let transport = crate::transport::tcp::TcpTransport::new(tcp_config).await?;
+                Ok(Box::new(transport))
+            }
+            TransportType::Mock => {
+                let mock_config = if let Some(config) = config {
+                    serde_json::from_value(config)
+                        .map_err(|e| Error::Configuration {
+                            message: format!("Invalid Mock config: {}", e),
+                            source: Some(Box::new(e)),
+                        })?
+                } else {
+                    crate::transport::mock::MockConfig::default()
+                };
+                
+                let transport = crate::transport::mock::MockTransport::new(mock_config).await?;
+                Ok(Box::new(transport))
+            }
+            _ => Err(Error::Configuration {
+                message: format!("Transport type {} not supported", transport_type),
                 source: None,
-            })?;
-        
-        // This is a simplified implementation
-        // In practice, you'd need to deserialize the config and create the transport
-        drop(factories);
-        
-        let mut stats = self.stats.write().await;
-        stats.creation_failures += 1; // Since we're not actually creating
-        
-        Err(Error::Configuration {
-            message: "Transport creation not fully implemented due to type erasure complexity".to_string(),
-            source: None,
-        })
+            })
+        }
     }
     
     /// Create a transport from a URI
@@ -251,9 +254,9 @@ impl TransportRegistry {
         
         let transport_type = self.scheme_to_transport_type(parsed.scheme())?;
         
-        if !self.is_registered(&transport_type).await {
+        if !self.is_supported(&transport_type).await {
             return Err(Error::Configuration {
-                message: format!("Transport type {} not registered for scheme {}", transport_type, parsed.scheme()),
+                message: format!("Transport type {} not supported for scheme {}", transport_type, parsed.scheme()),
                 source: None,
             });
         }
@@ -444,7 +447,6 @@ impl TransportFactory for MockTransportFactory {
 /// Builder for creating a configured transport registry
 pub struct RegistryBuilder {
     config: RegistryConfig,
-    factories: Vec<Box<dyn Fn() -> Box<dyn std::any::Any + Send + Sync> + Send + Sync>>,
 }
 
 impl Default for RegistryBuilder {
@@ -458,7 +460,6 @@ impl RegistryBuilder {
     pub fn new() -> Self {
         Self {
             config: RegistryConfig::default(),
-            factories: Vec::new(),
         }
     }
     
@@ -500,13 +501,7 @@ impl RegistryBuilder {
     
     /// Build the registry
     pub async fn build(self) -> Result<TransportRegistry> {
-        let registry = TransportRegistry::new(self.config)?;
-        
-        // Register built-in factories
-        registry.register_factory(TcpTransportFactory).await?;
-        registry.register_factory(MockTransportFactory).await?;
-        
-        Ok(registry)
+        TransportRegistry::new(self.config)
     }
 }
 
@@ -540,22 +535,16 @@ mod tests {
     }
     
     #[tokio::test]
-    async fn test_factory_registration() {
+    async fn test_transport_support() {
         let registry = TransportRegistry::default().unwrap();
         
-        // Initially no factories registered
         let types = registry.list_transport_types().await;
-        assert_eq!(types.len(), 0);
-        
-        // Register a factory
-        registry.register_factory(TcpTransportFactory).await.unwrap();
-        
-        let types = registry.list_transport_types().await;
-        assert_eq!(types.len(), 1);
         assert!(types.contains(&TransportType::Tcp));
+        assert!(types.contains(&TransportType::Mock));
         
-        assert!(registry.is_registered(&TransportType::Tcp).await);
-        assert!(!registry.is_registered(&TransportType::Mock).await);
+        assert!(registry.is_supported(&TransportType::Tcp).await);
+        assert!(registry.is_supported(&TransportType::Mock).await);
+        assert!(!registry.is_supported(&TransportType::WebSocket).await);
     }
     
     #[tokio::test]

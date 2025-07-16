@@ -233,7 +233,7 @@ impl Connection for MockConnection {
         }
         
         // Create channels for message passing
-        let (send_tx, mut send_rx) = mpsc::unbounded_channel();
+        let (send_tx, mut send_rx) = mpsc::unbounded_channel::<()>();
         let (receive_tx, receive_rx) = mpsc::unbounded_channel();
         
         self.send_tx = Some(receive_tx);
