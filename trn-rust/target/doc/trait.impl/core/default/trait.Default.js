@@ -1,9 +1,0 @@
-(function() {
-    var implementors = Object.fromEntries([["trn_rust",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.86.0/core/default/trait.Default.html\" title=\"trait core::default::Default\">Default</a> for <a class=\"struct\" href=\"trn_rust/struct.TrnBuilder.html\" title=\"struct trn_rust::TrnBuilder\">TrnBuilder</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.86.0/core/default/trait.Default.html\" title=\"trait core::default::Default\">Default</a> for <a class=\"struct\" href=\"trn_rust/struct.TrnMatcher.html\" title=\"struct trn_rust::TrnMatcher\">TrnMatcher</a>"]]]]);
-    if (window.register_implementors) {
-        window.register_implementors(implementors);
-    } else {
-        window.pending_implementors = implementors;
-    }
-})()
-//{"start":57,"fragment_lengths":[556]}

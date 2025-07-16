@@ -1,537 +1,415 @@
-use trn_rust::*;
-
-// =================================
-// Complete TRN Workflow Integration Tests
-// =================================
+use trn_rust::{Trn, TrnBuilder, is_valid_trn, url_to_trn};
 
 #[test]
 fn test_complete_trn_workflow() {
-    // 1. Create TRN using builder
-    let trn = TrnBuilder::new()
+    // Create TRN using constructor
+    let trn1 = Trn::new("user", "alice", "tool", "myapi", "v1.0").unwrap();
+    
+    // Create TRN using builder
+    let trn2 = TrnBuilder::new()
         .platform("user")
         .scope("alice")
         .resource_type("tool")
-        .type_("openapi")
-        .instance_id("github-api")
+        .resource_id("myapi")
         .version("v1.0")
         .build()
         .unwrap();
     
-    // 2. Validate the TRN
-    assert!(trn.validate().is_ok());
-    assert!(trn.is_valid());
+    // Create TRN from string
+    let trn3 = Trn::parse("trn:user:alice:tool:myapi:v1.0").unwrap();
     
-    // 3. Convert to string representation
-    let trn_string = trn.to_string();
-    assert_eq!(trn_string, "trn:user:alice:tool:openapi:github-api:v1.0");
+    // All should be equal
+    assert_eq!(trn1.to_string(), trn2.to_string());
+    assert_eq!(trn2.to_string(), trn3.to_string());
     
-    // 4. Parse back from string
-    let parsed_trn = Trn::parse(&trn_string).unwrap();
-    assert_eq!(trn, parsed_trn);
-    
-    // 5. Convert to URL
-    let url = trn.to_url().unwrap();
-    // URL encoding may occur, so check structure instead of exact match
-    assert!(url.starts_with("trn://user/alice/tool/openapi/"));
-    assert!(url.contains("github") && url.contains("api"));
-    assert!(url.contains("1") && url.contains("0"));
-    
-    // 6. Convert back from URL
-    let trn_from_url = url_to_trn(&url).unwrap();
-    assert_eq!(trn, trn_from_url);
-    
-    // 7. Test pattern matching
-    assert!(trn.matches_pattern("trn:user:*:tool:*:*:*"));
-    assert!(trn.matches_pattern("trn:*:alice:*:*:*:*"));
-    assert!(!trn.matches_pattern("trn:org:*:*:*:*:*"));
+    // All should be valid
+    assert!(trn1.is_valid());
+    assert!(trn2.is_valid());
+    assert!(trn3.is_valid());
+    assert!(is_valid_trn(&trn1.to_string()));
 }
 
 #[test]
-fn test_multi_platform_integration() {
-    // Create TRNs for different platforms using various methods
-    let trns = vec![
-        // Using builder
-        TrnBuilder::new()
-            .platform("aiplatform")
-            .resource_type("model")
-            .type_("bert")
-            .instance_id("base-model")
-            .version("v1.0")
-            .build()
-            .unwrap(),
-        
-        // Using user tool template
-        TrnBuilder::user_tool("alice")
-            .type_("openapi")
-            .instance_id("github-api")
-            .version("v1.0")
-            .build()
-            .unwrap(),
-        
-        // Using org tool template
-        TrnBuilder::org_tool("company")
-            .type_("python")
-            .instance_id("data-processor")
-            .version("v2.0")
-            .build()
-            .unwrap(),
-        
-        // Using parse
-        Trn::parse("trn:user:bob:tool:workflow:automation:latest").unwrap(),
+fn test_trn_url_roundtrip_workflow() {
+    let original = Trn::new("org", "company", "model", "bert-large", "v2.1").unwrap();
+    
+    // Convert to TRN URL
+    let trn_url = original.to_url().unwrap();
+    assert!(trn_url.starts_with("trn://"));
+    
+    // Convert back from URL
+    let from_url = url_to_trn(&trn_url).unwrap();
+    
+    // Should be identical
+    assert_eq!(original.platform(), from_url.platform());
+    assert_eq!(original.scope(), from_url.scope());
+    assert_eq!(original.resource_type(), from_url.resource_type());
+    assert_eq!(original.resource_id(), from_url.resource_id());
+    assert_eq!(original.version(), from_url.version());
+    
+    // Convert to HTTP URL
+    let http_url = original.to_http_url("https://registry.example.com").unwrap();
+    assert!(http_url.starts_with("https://registry.example.com"));
+    assert!(http_url.contains("org"));
+    assert!(http_url.contains("company"));
+    assert!(http_url.contains("model"));
+    assert!(http_url.contains("bert-large"));
+    assert!(http_url.contains("v2.1"));
+}
+
+#[test]
+fn test_different_platforms_integration() {
+    let platforms = vec![
+        ("user", "alice", "Personal user platform"),
+        ("org", "company", "Organization platform"),
+        ("aiplatform", "system", "AI platform"),
+        ("custom", "scope", "Custom platform"),
     ];
     
-    // Validate all TRNs
-    for trn in &trns {
-        assert!(trn.validate().is_ok());
-    }
-    
-    // Test pattern matching across all TRNs
-    let user_matcher = TrnMatcher::new("trn:user:*:*:*:*:*").unwrap();
-    let tool_matcher = TrnMatcher::new("trn:*:*:tool:*:*:*").unwrap();
-    
-    let trn_strings: Vec<String> = trns.iter().map(|t| t.to_string()).collect();
-    
-    let user_trns = user_matcher.filter_trns(&trn_strings);
-    assert_eq!(user_trns.len(), 2); // alice and bob
-    
-    let tool_trns = tool_matcher.filter_trns(&trn_strings);
-    assert_eq!(tool_trns.len(), 3); // All except the model
-    
-    // Test URL conversion for all
-    for trn in &trns {
+    for (platform, scope, description) in platforms {
+        // Create TRN
+        let trn = Trn::new(platform, scope, "tool", "myapi", "v1.0").unwrap();
+        
+        // Validate
+        assert!(trn.is_valid(), "TRN should be valid for {}", description);
+        
+        // Test string conversion
+        let trn_str = trn.to_string();
+        assert!(trn_str.starts_with("trn:"));
+        assert!(trn_str.contains(platform));
+        assert!(trn_str.contains(scope));
+        
+        // Test parsing back
+        let parsed = Trn::parse(&trn_str).unwrap();
+        assert_eq!(trn.platform(), parsed.platform());
+        assert_eq!(trn.scope(), parsed.scope());
+        
+        // Test URL conversion
         let url = trn.to_url().unwrap();
-        let back_to_trn = url_to_trn(&url).unwrap();
-        assert_eq!(trn, &back_to_trn);
+        let from_url = url_to_trn(&url).unwrap();
+        assert_eq!(trn.to_string(), from_url.to_string());
     }
 }
 
 #[test]
-fn test_batch_operations_integration() {
-    // Create a large set of TRNs using different methods
-    let mut trn_strings = Vec::new();
+fn test_different_resource_types_integration() {
+    let resource_types = vec!["tool", "model", "dataset", "pipeline", "custom-type"];
     
-    // Add TRNs using builder
-    for i in 0..50 {
-        let trn = TrnBuilder::new()
-            .platform("user")
-            .scope(&format!("user{}", i))
-            .resource_type("tool")
-            .type_("openapi")
-            .instance_id(&format!("api{}", i))
-            .version("v1.0")
-            .build()
-            .unwrap();
-        trn_strings.push(trn.to_string());
+    for resource_type in resource_types {
+        let trn = Trn::new("user", "alice", resource_type, "resource", "v1.0").unwrap();
+        
+        // Test all conversions
+        let trn_str = trn.to_string();
+        let parsed = Trn::parse(&trn_str).unwrap();
+        let url = trn.to_url().unwrap();
+        let from_url = url_to_trn(&url).unwrap();
+        
+        // All should match
+        assert_eq!(trn.resource_type(), parsed.resource_type());
+        assert_eq!(parsed.resource_type(), from_url.resource_type());
+        assert!(trn.is_valid());
+        assert!(parsed.is_valid());
+        assert!(from_url.is_valid());
     }
-    
-    // Add some model TRNs
-    for i in 0..25 {
-        let trn_str = format!("trn:aiplatform:model:bert:model{}:v1.0", i);
-        trn_strings.push(trn_str);
-    }
-    
-    // Add some invalid TRNs for testing
-    trn_strings.push("invalid-trn".to_string());
-    trn_strings.push("trn:incomplete".to_string());
-    
-    // Batch validate
-    let validation_report = batch_validate(&trn_strings);
-    assert_eq!(validation_report.total, 77);
-    assert_eq!(validation_report.valid, 75); // 50 user tools + 25 models
-    assert_eq!(validation_report.invalid, 2); // 2 invalid TRNs
-    
-    // Filter out invalid TRNs and work with valid ones
-    let valid_trns: Vec<String> = trn_strings
-        .into_iter()
-        .filter(|s| is_valid_trn(s))
-        .collect();
-    
-    assert_eq!(valid_trns.len(), 75);
-    
-    // Test pattern matching on the batch
-    let user_tools = find_matching_trns(&valid_trns, "trn:user:*:tool:*:*:*");
-    assert_eq!(user_tools.len(), 50);
-    
-    let models = find_matching_trns(&valid_trns, "trn:*:*:model:*:*:*");
-    assert_eq!(models.len(), 25);
-    
-    let all_v1 = find_matching_trns(&valid_trns, "trn:*:*:*:*:*:v1.0");
-    assert_eq!(all_v1.len(), 75); // All have v1.0
 }
 
-#[test] 
-fn test_builder_pattern_variations() {
-    // Test different builder patterns and ensure they work with other features
+#[test]
+fn test_version_handling_integration() {
+    let versions = vec![
+        "v1.0",
+        "latest",
+        "dev",
+        "main",
+        "1.2.3",
+        "v2.0-beta",
+        "feature-branch",
+        "v1.0.0-rc.1",
+    ];
     
-    // Basic builder
-    let basic_trn = TrnBuilder::new()
-        .platform("aiplatform")
+    for version in versions {
+        let trn = Trn::new("user", "alice", "tool", "myapi", version).unwrap();
+        
+        // Test version handling
+        assert_eq!(trn.version(), version);
+        assert!(trn.is_valid());
+        
+        // Test base TRN (version becomes wildcard)
+        let base = trn.base_trn();
+        assert_eq!(base.version(), "*");
+        assert_eq!(base.platform(), trn.platform());
+        assert_eq!(base.scope(), trn.scope());
+        assert_eq!(base.resource_type(), trn.resource_type());
+        assert_eq!(base.resource_id(), trn.resource_id());
+        
+        // Test compatibility
+        let other_version = Trn::new("user", "alice", "tool", "myapi", "v2.0").unwrap();
+        assert!(trn.is_compatible_with(&other_version));
+    }
+}
+
+#[test]
+fn test_pattern_matching_integration() {
+    let trns = vec![
+        Trn::new("user", "alice", "tool", "api1", "v1.0").unwrap(),
+        Trn::new("user", "alice", "tool", "api2", "v1.0").unwrap(),
+        Trn::new("user", "bob", "tool", "api1", "v1.0").unwrap(),
+        Trn::new("org", "company", "model", "bert", "v2.0").unwrap(),
+        Trn::new("user", "alice", "model", "gpt", "v1.5").unwrap(),
+    ];
+    
+    // Test various pattern combinations
+    let patterns = vec![
+        ("trn:user:alice:*:*:*", 3), // Alice's resources
+        ("trn:*:*:tool:*:*", 3),     // All tools
+        ("trn:*:*:model:*:*", 2),    // All models
+        ("trn:user:*:*:*:v1.0", 3),  // User v1.0 resources
+        ("trn:*:*:*:*:*", 5),        // Everything
+    ];
+    
+    for (pattern, expected_count) in patterns {
+        let matches = trns.iter()
+            .filter(|trn| trn.matches_pattern(pattern))
+            .count();
+        assert_eq!(matches, expected_count, "Pattern {} should match {} TRNs", pattern, expected_count);
+    }
+}
+
+#[test]
+fn test_builder_workflow_integration() {
+    // Start with minimal builder
+    let mut builder = TrnBuilder::new();
+    
+    // Build step by step
+    builder = builder.platform("user");
+    builder = builder.scope("alice");
+    builder = builder.resource_type("tool");
+    builder = builder.resource_id("myapi");
+    builder = builder.version("v1.0");
+    
+    let trn = builder.build().unwrap();
+    
+    // Test the result
+    assert_eq!(trn.platform(), "user");
+    assert_eq!(trn.scope(), "alice");
+    assert_eq!(trn.resource_type(), "tool");
+    assert_eq!(trn.resource_id(), "myapi");
+    assert_eq!(trn.version(), "v1.0");
+    assert!(trn.is_valid());
+    
+    // Test chaining
+    let chained = TrnBuilder::new()
+        .platform("org")
+        .scope("company")
         .resource_type("model")
-        .type_("bert")
-        .instance_id("base-model")
-        .version("v1.0")
+        .resource_id("bert")
+        .version("v2.1")
         .build()
         .unwrap();
     
-    // Builder with optional fields
-    let full_trn = TrnBuilder::new()
-        .platform("user")
-        .scope("alice")
-        .resource_type("tool")
-        .type_("openapi")
-        .subtype("rest")
-        .instance_id("github-api")
-        .version("v1.0")
-        .tag("stable")
-        .hash("sha256:a1b2c3d4e5f6789abcdef0123456789abcdef0123456789abcdef0123456789a")
+    assert_eq!(chained.to_string(), "trn:org:company:model:bert:v2.1");
+    
+    // Test modification
+    let modified = TrnBuilder::new()
+        .platform(chained.platform())
+        .scope(chained.scope())
+        .resource_type(chained.resource_type())
+        .resource_id(chained.resource_id())
+        .version("v3.0")  // Change version
         .build()
         .unwrap();
     
-    // Builder using enums
-    let enum_trn = TrnBuilder::new()
-        .platform_enum(Platform::User)
-        .scope("bob")
-        .resource_type_enum(ResourceType::Tool)
-        .tool_type(ToolType::Python)
-        .instance_id("data-script")
-        .version_v(2, 1, 0)
-        .build()
-        .unwrap();
-    
-    let trns = vec![basic_trn, full_trn, enum_trn];
-    
-    // Test validation for all
-    for trn in &trns {
-        assert!(validate(trn).is_ok());
-    }
-    
-    // Test URL conversion
-    for trn in &trns {
-        let url = trn.to_url().unwrap();
-        let back_to_trn = url_to_trn(&url).unwrap();
-        assert_eq!(trn, &back_to_trn);
-    }
-    
-    // Test pattern matching
-    let tool_matcher = TrnMatcher::new("trn:*:*:tool:*:*:*").unwrap();
-    let user_matcher = TrnMatcher::new("trn:user:*:*:*:*:*").unwrap();
-    
-    assert!(!tool_matcher.matches(&trns[0].to_string())); // model, not tool
-    assert!(tool_matcher.matches(&trns[1].to_string())); // tool
-    assert!(tool_matcher.matches(&trns[2].to_string())); // tool
-    
-    assert!(!user_matcher.matches(&trns[0].to_string())); // aiplatform
-    assert!(user_matcher.matches(&trns[1].to_string())); // user alice
-    assert!(user_matcher.matches(&trns[2].to_string())); // user bob
+    assert!(chained.is_compatible_with(&modified));
+    assert_ne!(chained.version(), modified.version());
 }
 
 #[test]
 fn test_error_handling_integration() {
-    // Test error handling across different components
+    // Test invalid TRN strings
+    let invalid_trns = vec![
+        "",
+        "invalid",
+        "trn:user:alice",
+        "trn:user:alice:tool:myapi:v1.0:extra",
+        "nottrn:user:alice:tool:myapi:v1.0",
+        "trn::alice:tool:myapi:v1.0",
+        "trn:user::tool:myapi:v1.0",
+        "trn:user:alice::myapi:v1.0",
+        "trn:user:alice:tool::v1.0",
+        "trn:user:alice:tool:myapi:",
+    ];
     
-    // Invalid TRN creation should be caught
-    let invalid_build_result = TrnBuilder::new()
-        .platform("user")
-        // Missing scope for user platform
-        .resource_type("tool")
-        .type_("openapi")
-        .instance_id("github-api")
-        .version("v1.0")
-        .build();
-    assert!(invalid_build_result.is_err());
+    for invalid_trn in invalid_trns {
+        assert!(Trn::parse(invalid_trn).is_err(), "Should fail for: {}", invalid_trn);
+        assert!(!is_valid_trn(invalid_trn), "Should be invalid: {}", invalid_trn);
+    }
     
-    // Invalid parsing should be caught
-    assert!(Trn::parse("invalid-trn-format").is_err());
-    assert!(Trn::parse("trn:incomplete").is_err());
+    // Test invalid builder usage
+    let incomplete_builders = vec![
+        TrnBuilder::new().scope("alice").resource_type("tool").resource_id("myapi").version("v1.0"),
+        TrnBuilder::new().platform("user").resource_type("tool").resource_id("myapi").version("v1.0"),
+        TrnBuilder::new().platform("user").scope("alice").resource_id("myapi").version("v1.0"),
+        TrnBuilder::new().platform("user").scope("alice").resource_type("tool").version("v1.0"),
+        TrnBuilder::new().platform("user").scope("alice").resource_type("tool").resource_id("myapi"),
+    ];
     
-    // Invalid URL conversion should be caught
-    assert!(url_to_trn("http://example.com").is_err());
-    assert!(url_to_trn("invalid-url").is_err());
-    
-    // Invalid pattern should be caught
-    assert!(TrnMatcher::new("invalid-pattern").is_err());
-    assert!(TrnMatcher::new("trn:incomplete").is_err());
-    
-    // Test that valid operations still work after errors
-    let valid_trn = TrnBuilder::new()
-        .platform("aiplatform")
-        .resource_type("model")
-        .type_("bert")
-        .instance_id("base-model")
-        .version("v1.0")
-        .build()
-        .unwrap();
-    
-    assert!(valid_trn.validate().is_ok());
-    assert!(valid_trn.to_url().is_ok());
+    for builder in incomplete_builders {
+        assert!(builder.build().is_err(), "Incomplete builder should fail");
+    }
 }
 
 #[test]
-fn test_complex_pattern_matching_integration() {
-    // Create diverse set of TRNs
-    let trns = vec![
-        "trn:user:alice:tool:openapi:github-api:v1.0",
-        "trn:user:alice:tool:python:data-analysis:v2.0", 
-        "trn:user:bob:tool:openapi:slack-api:v1.0",
-        "trn:org:company:tool:python:ml-pipeline:v1.0",
-        "trn:org:company:model:bert:classifier:v2.0",
-        "trn:aiplatform:model:gpt:text-generator:latest",
-        "trn:user:charlie:dataset:csv:user-data:v1.0",
-    ];
+fn test_serialization_integration() {
+    let trn = Trn::new("user", "alice", "tool", "myapi", "v1.0").unwrap();
     
-    let trn_strings: Vec<String> = trns.iter().map(|s| s.to_string()).collect();
+    // Test JSON serialization
+    let json = trn.to_json().unwrap();
+    assert!(json.contains("user"));
+    assert!(json.contains("alice"));
+    assert!(json.contains("tool"));
+    assert!(json.contains("myapi"));
+    assert!(json.contains("v1.0"));
     
-    // Create multiple matchers for complex queries
-    let mut alice_matcher = TrnMatcher::empty();
-    alice_matcher.add_pattern("trn:user:alice:*:*:*:*").unwrap();
+    let from_json = Trn::from_json(&json).unwrap();
+    assert_eq!(trn.to_string(), from_json.to_string());
     
-    let mut python_matcher = TrnMatcher::empty();
-    python_matcher.add_pattern("trn:*:*:*:python:*:*").unwrap();
-    
-    let mut v1_tools_matcher = TrnMatcher::empty();
-    v1_tools_matcher.add_pattern("trn:*:*:tool:*:*:v1.0").unwrap();
-    
-    // Test individual matchers
-    let alice_trns = alice_matcher.filter_trns(&trn_strings);
-    assert_eq!(alice_trns.len(), 2);
-    
-    let python_trns = python_matcher.filter_trns(&trn_strings);
-    assert_eq!(python_trns.len(), 2);
-    
-    let v1_tools = v1_tools_matcher.filter_trns(&trn_strings);
-    assert_eq!(v1_tools.len(), 3);
-    
-    // Test pattern combinations using find_matching_trns
-    let user_tools = find_matching_trns(&trn_strings, "trn:user:*:tool:*:*:*");
-    assert_eq!(user_tools.len(), 3);
-    
-    let org_resources = find_matching_trns(&trn_strings, "trn:org:*:*:*:*:*");
-    assert_eq!(org_resources.len(), 2);
-    
-    let all_models = find_matching_trns(&trn_strings, "trn:*:*:model:*:*:*");
-    assert_eq!(all_models.len(), 2);
-    
-    // Convert all to URLs and test pattern matching still works
-    let urls: Vec<String> = trn_strings
-        .iter()
-        .map(|s| {
-            let trn = Trn::parse(s).unwrap();
-            trn.to_url().unwrap()
-        })
-        .collect();
-    
-    // Convert back from URLs and test patterns still match
-    let back_from_urls: Vec<String> = urls
-        .iter()
-        .map(|url| {
-            let trn = url_to_trn(url).unwrap();
-            trn.to_string()
-        })
-        .collect();
-    
-    assert_eq!(trn_strings, back_from_urls);
-    
-    // Pattern matching should work the same on converted TRNs
-    let user_tools_after_roundtrip = find_matching_trns(&back_from_urls, "trn:user:*:tool:*:*:*");
-    assert_eq!(user_tools_after_roundtrip.len(), 3);
+    // Test that deserialized TRN is valid
+    assert!(from_json.is_valid());
 }
 
 #[test]
-fn test_version_and_metadata_integration() {
-    // Test TRNs with various version formats and metadata
-    let trns_with_metadata = vec![
-        TrnBuilder::new()
-            .platform("user")
-            .scope("alice")
-            .resource_type("tool")
-            .type_("openapi")
-            .instance_id("github-api")
-            .semver(1, 2, 3)
-            .build()
-            .unwrap(),
-        
-        TrnBuilder::new()
-            .platform("user")
-            .scope("alice")
-            .resource_type("tool")
-            .type_("openapi")
-            .instance_id("github-api")
-            .version("latest")
-            .tag("stable")
-            .build()
-            .unwrap(),
-        
-        TrnBuilder::new()
-            .platform("user")
-            .scope("alice")
-            .resource_type("tool")
-            .type_("openapi")
-            .instance_id("github-api")
-            .version("v2.0")
-            .sha256_hash("abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890")
-            .build()
-            .unwrap(),
-    ];
+fn test_special_characters_integration() {
+    let special_trn = Trn::new(
+        "user", 
+        "alice-smith", 
+        "custom-type", 
+        "my_api.v2", 
+        "v1.0-beta.1"
+    ).unwrap();
     
-    // All should be valid
-    for trn in &trns_with_metadata {
-        assert!(trn.validate().is_ok());
-    }
+    // Test string round trip
+    let trn_str = special_trn.to_string();
+    let parsed = Trn::parse(&trn_str).unwrap();
+    assert_eq!(special_trn.to_string(), parsed.to_string());
     
-    // Test URL roundtrip preserves metadata
-    for trn in &trns_with_metadata {
-        let url = trn.to_url().unwrap();
-        let back_to_trn = url_to_trn(&url).unwrap();
-        assert_eq!(trn, &back_to_trn);
-        
-        // Check specific metadata is preserved
-        assert_eq!(trn.version(), back_to_trn.version());
-        assert_eq!(trn.tag(), back_to_trn.tag());
-        assert_eq!(trn.hash(), back_to_trn.hash());
-    }
+    // Test URL round trip
+    let url = special_trn.to_url().unwrap();
+    let from_url = url_to_trn(&url).unwrap();
+    assert_eq!(special_trn.to_string(), from_url.to_string());
     
-    // Test pattern matching works with metadata
-    let base_pattern = "trn:user:alice:tool:openapi:github-api:*";
-    for trn in &trns_with_metadata {
-        assert!(trn.matches_pattern(base_pattern));
-    }
+    // Test validation
+    assert!(special_trn.is_valid());
+    assert!(parsed.is_valid());
+    assert!(from_url.is_valid());
     
-    // Test specific version pattern matching
-    let semver_trn = &trns_with_metadata[0];
-    assert!(semver_trn.matches_pattern("trn:*:*:*:*:*:1.2.3"));
-    
-    let latest_trn = &trns_with_metadata[1];
-    assert!(latest_trn.matches_pattern("trn:*:*:*:*:*:latest"));
+    // Test pattern matching
+    assert!(special_trn.matches_pattern("trn:user:alice-*:custom-type:my_api.v2:v1.0-*"));
+    assert!(special_trn.matches_pattern("trn:user:alice-smith:*-type:*:*"));
 }
 
 #[test]
 fn test_performance_integration() {
-    // Test that all operations work efficiently together on larger datasets
-    let mut trns = Vec::new();
+    use std::time::Instant;
     
-    // Generate 1000 diverse TRNs
+    let start = Instant::now();
+    
+    // Create, validate, and convert 1000 TRNs
     for i in 0..1000 {
-        let platform = match i % 3 {
-            0 => "user",
-            1 => "org", 
-            _ => "aiplatform",
-        };
+        let trn = Trn::new("user", &format!("user{}", i), "tool", &format!("api{}", i), "v1.0").unwrap();
+        assert!(trn.is_valid());
         
-        let (scope, resource_type) = match platform {
-            "user" => (Some(format!("user{}", i)), "tool"),
-            "org" => (Some(format!("org{}", i)), "tool"),
-            _ => (None, "model"),
-        };
+        let trn_str = trn.to_string();
+        let parsed = Trn::parse(&trn_str).unwrap();
+        assert_eq!(trn.to_string(), parsed.to_string());
         
-        let mut builder = TrnBuilder::new().platform(platform);
-        
-        if let Some(s) = scope {
-            builder = builder.scope(s);
-        }
-        
-        let trn = builder
-            .resource_type(resource_type)
-            .type_("openapi")
-            .instance_id(&format!("resource{}", i))
-            .version(&format!("v{}.0", i % 5 + 1))
-            .build()
-            .unwrap();
-            
-        trns.push(trn);
-    }
-    
-    // Batch validate
-    let trn_strings: Vec<String> = trns.iter().map(|t| t.to_string()).collect();
-    let validation_report = batch_validate(&trn_strings);
-    assert_eq!(validation_report.total, 1000);
-    assert_eq!(validation_report.valid, 1000); // All should be valid
-    
-    // Test pattern matching performance  
-    let user_trns = find_matching_trns(&trn_strings, "trn:user:*:*:*:*:*");
-    assert!(user_trns.len() > 300 && user_trns.len() < 350); // Roughly 1/3
-    
-    // Test URL conversion performance
-    for trn in trns.iter().take(100) { // Test first 100 for performance
         let url = trn.to_url().unwrap();
-        let back_to_trn = url_to_trn(&url).unwrap();
-        assert_eq!(trn, &back_to_trn);
+        let from_url = url_to_trn(&url).unwrap();
+        assert_eq!(trn.to_string(), from_url.to_string());
+        
+        assert!(trn.matches_pattern("trn:user:*:tool:*:v1.0"));
     }
+    
+    let duration = start.elapsed();
+    // Should complete 1000 full workflows in less than 1 second
+    assert!(duration.as_millis() < 1000, "Integration test too slow: {:?}", duration);
 }
 
 #[test]
-fn test_real_world_scenario() {
-    // Simulate a real-world scenario with mixed operations
+fn test_edge_cases_integration() {
+    // Test minimum valid TRN (6 components with minimum required lengths)
+    let min_trn = Trn::new("aa", "b", "tool", "d", "e").unwrap();
+    assert!(min_trn.is_valid());
     
-    // 1. Data ingestion - parse TRNs from various sources
-    let external_trns = vec![
-        "trn:user:alice:tool:openapi:github-api:v1.0",
-        "trn:user:bob:tool:python:data-processor:v2.0", 
-        "trn:org:acme:model:bert:sentiment-analyzer:v1.5",
-        "trn:aiplatform:model:gpt:code-generator:latest",
-    ];
+    let min_str = min_trn.to_string();
+    assert_eq!(min_str, "trn:aa:b:tool:d:e");
     
-    let parsed_trns: Vec<Trn> = external_trns
-        .iter()
-        .filter_map(|s| Trn::parse(s).ok())
-        .collect();
+    let min_parsed = Trn::parse(&min_str).unwrap();
+    assert_eq!(min_trn, min_parsed);
     
-    assert_eq!(parsed_trns.len(), 4);
+    let min_url = min_trn.to_url().unwrap();
+    let min_from_url = url_to_trn(&min_url).unwrap();
+    assert_eq!(min_trn.to_string(), min_from_url.to_string());
     
-    // 2. Create new TRNs using builder
-    let new_trns = vec![
-        TrnBuilder::user_tool("charlie")
-            .type_("workflow")
-            .instance_id("automation")
-            .version("v1.0")
-            .build()
-            .unwrap(),
-        
-        TrnBuilder::new()
-            .platform("org")
-            .scope("acme")
-            .dataset()
-            .type_("csv")
-            .instance_id("customer-data")
-            .latest()
-            .build()
-            .unwrap(),
-    ];
+    // Test with longer but valid components
+    let long_trn = Trn::new(
+        &"platform".repeat(2),
+        &"scope".repeat(2),
+        "tool",  // Use supported resource type
+        &"resource".repeat(5),
+        &"version".repeat(2)
+    ).unwrap();
     
-    // 3. Combine all TRNs
-    let mut all_trns = parsed_trns;
-    all_trns.extend(new_trns);
+    assert!(long_trn.is_valid());
     
-    // 4. Validate everything
-    for trn in &all_trns {
-        assert!(trn.validate().is_ok());
-    }
+    let long_str = long_trn.to_string();
+    let long_parsed = Trn::parse(&long_str).unwrap();
+    assert_eq!(long_trn.to_string(), long_parsed.to_string());
+}
+
+#[test]
+fn test_library_consistency() {
+    // Test that all creation methods produce consistent results
+    let platform = "user";
+    let scope = "alice";
+    let resource_type = "tool";
+    let resource_id = "myapi";
+    let version = "v1.0";
     
-    // 5. Filter and categorize
-    let tool_matcher = TrnMatcher::new("trn:*:*:tool:*:*:*").unwrap();
-    let model_matcher = TrnMatcher::new("trn:*:*:model:*:*:*").unwrap();
-    let user_matcher = TrnMatcher::new("trn:user:*:*:*:*:*").unwrap();
+    // Method 1: Constructor
+    let trn1 = Trn::new(platform, scope, resource_type, resource_id, version).unwrap();
     
-    let trn_strings: Vec<String> = all_trns.iter().map(|t| t.to_string()).collect();
+    // Method 2: Builder
+    let trn2 = TrnBuilder::new()
+        .platform(platform)
+        .scope(scope)
+        .resource_type(resource_type)
+        .resource_id(resource_id)
+        .version(version)
+        .build()
+        .unwrap();
     
-    let tools = tool_matcher.filter_trns(&trn_strings);
-    let models = model_matcher.filter_trns(&trn_strings);
-    let user_resources = user_matcher.filter_trns(&trn_strings);
+    // Method 3: Parsing
+    let trn_string = format!("trn:{}:{}:{}:{}:{}", platform, scope, resource_type, resource_id, version);
+    let trn3 = Trn::parse(&trn_string).unwrap();
     
-    assert_eq!(tools.len(), 3); // github-api, data-processor, automation
-    assert_eq!(models.len(), 2); // sentiment-analyzer, code-generator  
-    assert_eq!(user_resources.len(), 3); // alice, bob, charlie
+    // All should be identical
+    assert_eq!(trn1.to_string(), trn2.to_string());
+    assert_eq!(trn2.to_string(), trn3.to_string());
+    assert_eq!(trn3.to_string(), trn1.to_string());
     
-    // 6. Export as URLs
-    let urls: Vec<String> = all_trns
-        .iter()
-        .map(|trn| trn.to_url().unwrap())
-        .collect();
+    // All should be valid
+    assert!(trn1.is_valid());
+    assert!(trn2.is_valid());
+    assert!(trn3.is_valid());
     
-    assert_eq!(urls.len(), 6);
-    
-    // 7. Verify roundtrip integrity
-    for (original_trn, url) in all_trns.iter().zip(urls.iter()) {
-        let reconstructed = url_to_trn(url).unwrap();
-        assert_eq!(original_trn, &reconstructed);
-    }
+    // All should have same properties
+    assert_eq!(trn1.platform(), trn2.platform());
+    assert_eq!(trn2.platform(), trn3.platform());
+    assert_eq!(trn1.scope(), trn2.scope());
+    assert_eq!(trn2.scope(), trn3.scope());
+    assert_eq!(trn1.resource_type(), trn2.resource_type());
+    assert_eq!(trn2.resource_type(), trn3.resource_type());
+    assert_eq!(trn1.resource_id(), trn2.resource_id());
+    assert_eq!(trn2.resource_id(), trn3.resource_id());
+    assert_eq!(trn1.version(), trn2.version());
+    assert_eq!(trn2.version(), trn3.version());
 } 

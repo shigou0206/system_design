@@ -11,9 +11,6 @@ keywords = ["trn", "tool", "resource", "name", "identifier", "ai", "agent", "pla
 categories = ["parsing", "web-programming", "development-tools"]
 readme = "README.md"
 exclude = [
-    "benches/*",
-    "tests/*",
-    "examples/*",
     ".github/*",
     "scripts/*"
 ]
@@ -103,17 +100,16 @@ debug = true
 [[bench]]
 name = "parsing"
 harness = false
-required-features = []
 
 [[bench]]
 name = "validation"
 harness = false
-required-features = []
 
 [[bench]]
 name = "url_conversion"
 harness = false
-required-features = []
+
+
 
 [package.metadata.docs.rs]
 all-features = true

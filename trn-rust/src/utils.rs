@@ -6,9 +6,9 @@
 use std::collections::HashMap;
 use std::cmp::Ordering;
 
-use crate::constants::*;
 use crate::error::{TrnError, TrnResult};
 use crate::types::{Trn, Platform};
+use crate::TrnBuilder;
 
 /// Hash algorithm enumeration
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,7 +115,8 @@ impl SemanticVersion {
     pub fn parse(version: &str) -> TrnResult<Self> {
         let version = version.trim_start_matches('v');
         
-        if let Some(captures) = SEMANTIC_VERSION_REGEX.captures(version) {
+        let version_regex = regex::Regex::new(r"^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9\.\-]+))?(?:\+([a-zA-Z0-9\.\-]+))?$").unwrap();
+        if let Some(captures) = version_regex.captures(version) {
             let major = captures.get(1)
                 .unwrap()
                 .as_str()
@@ -352,38 +353,9 @@ pub fn is_semantic_version(version: &str) -> bool {
 
 /// Transform a TRN to use a different version
 pub fn transform_version(trn: &Trn, new_version: &str) -> TrnResult<Trn> {
-    let mut builder = crate::TrnBuilder::new()
-        .platform(trn.platform())
-        .resource_type(trn.resource_type())
-        .type_(trn.type_())
-        .instance_id(trn.instance_id())
-        .version(new_version);
-    
-    if let Some(scope) = trn.scope() {
-        if !scope.is_empty() {
-            builder = builder.scope(scope);
-        }
-    }
-    
-    if let Some(subtype) = trn.subtype() {
-        if !subtype.is_empty() {
-            builder = builder.subtype(subtype);
-        }
-    }
-    
-    if let Some(tag) = trn.tag() {
-        if !tag.is_empty() {
-            builder = builder.tag(tag);
-        }
-    }
-    
-    if let Some(hash) = trn.hash() {
-        if !hash.is_empty() {
-            builder = builder.hash(hash);
-        }
-    }
-    
-    builder.build()
+    TrnBuilder::from_trn(trn)
+        .version(new_version)
+        .build()
 }
 
 /// Group TRNs by component
@@ -451,10 +423,6 @@ pub struct TrnStatistics {
     pub most_common_resource_type: Option<String>,
     /// Most common version
     pub most_common_version: Option<String>,
-    /// TRNs with hashes
-    pub trns_with_hash: usize,
-    /// TRNs with tags
-    pub trns_with_tag: usize,
     /// Average TRN length
     pub average_length: f64,
 }
@@ -464,8 +432,6 @@ pub fn calculate_trn_statistics(trns: &[String]) -> TrnStatistics {
     let mut platforms = HashMap::new();
     let mut resource_types = HashMap::new();
     let mut versions = HashMap::new();
-    let mut hash_count = 0;
-    let mut tag_count = 0;
     let mut total_length = 0;
     
     for trn_str in trns {
@@ -475,14 +441,6 @@ pub fn calculate_trn_statistics(trns: &[String]) -> TrnStatistics {
             *platforms.entry(trn.platform().to_string()).or_insert(0) += 1;
             *resource_types.entry(trn.resource_type().to_string()).or_insert(0) += 1;
             *versions.entry(trn.version().to_string()).or_insert(0) += 1;
-            
-            if trn.hash().is_some() {
-                hash_count += 1;
-            }
-            
-            if trn.tag().is_some() {
-                tag_count += 1;
-            }
         }
     }
     
@@ -509,8 +467,6 @@ pub fn calculate_trn_statistics(trns: &[String]) -> TrnStatistics {
         most_common_platform,
         most_common_resource_type,
         most_common_version,
-        trns_with_hash: hash_count,
-        trns_with_tag: tag_count,
         average_length: if trns.is_empty() {
             0.0
         } else {
@@ -582,16 +538,12 @@ pub fn convert_trn_format(trn: &str, format: TrnFormat) -> TrnResult<String> {
         TrnFormat::Components => {
             let components = parsed_trn.components();
             Ok(format!(
-                "Platform: {}\nScope: {:?}\nResource Type: {}\nType: {}\nSubtype: {:?}\nInstance ID: {}\nVersion: {}\nTag: {:?}\nHash: {:?}",
+                "Platform: {}\nScope: {}\nResource Type: {}\nResource ID: {}\nVersion: {}",
                 components.platform,
                 components.scope,
                 components.resource_type,
-                components.type_,
-                components.subtype,
-                components.instance_id,
-                components.version,
-                components.tag,
-                components.hash
+                components.resource_id,
+                components.version
             ))
         }
         TrnFormat::Json => {
@@ -638,7 +590,7 @@ pub fn sort_trns(trns: &mut [String], sort_by: TrnSortCriteria) {
             (Ok(ta), Ok(tb)) => match sort_by {
                 TrnSortCriteria::Platform => ta.platform().cmp(tb.platform()),
                 TrnSortCriteria::ResourceType => ta.resource_type().cmp(tb.resource_type()),
-                TrnSortCriteria::InstanceId => ta.instance_id().cmp(tb.instance_id()),
+                TrnSortCriteria::InstanceId => ta.resource_id().cmp(tb.resource_id()),
                 TrnSortCriteria::Version => {
                     match (SemanticVersion::parse(ta.version()), SemanticVersion::parse(tb.version())) {
                         (Ok(v1), Ok(v2)) => v1.cmp(&v2),
@@ -766,19 +718,15 @@ pub fn transform_platform(
     scope: Option<&str>
 ) -> TrnResult<Trn> {
     let mut new_trn = trn.clone();
-    new_trn.set_scope(scope.map(|s| s.to_string()));
+    new_trn.set_scope(scope.unwrap_or("").to_string());
     
     // Create new TRN with the new platform
-    Trn::new_full(
+    Trn::new(
         new_platform.to_string(),
-        scope.map(|s| s.to_string()),
+        scope.unwrap_or("").to_string(),
         trn.resource_type(),
-        trn.type_(),
-        trn.subtype().map(|s| s.to_string()),
-        trn.instance_id(),
-        trn.version(),
-        trn.tag().map(|s| s.to_string()),
-        trn.hash().map(|s| s.to_string()),
+        trn.resource_id(),
+        trn.version()
     )
 }
 
@@ -810,7 +758,7 @@ pub fn group_by_scope(trns: &[String]) -> HashMap<String, Vec<String>> {
     
     for trn_str in trns {
         if let Ok(trn) = Trn::parse(trn_str) {
-            let scope = trn.scope().unwrap_or("").to_string();
+            let scope = trn.scope().to_string();
             groups
                 .entry(scope)
                 .or_insert_with(Vec::new)
@@ -829,7 +777,7 @@ pub fn group_by_tool_type(trns: &[String]) -> HashMap<String, Vec<String>> {
         if let Ok(trn) = Trn::parse(trn_str) {
             if trn.resource_type() == "tool" {
                 groups
-                    .entry(trn.type_().to_string())
+                    .entry(trn.resource_type().to_string())
                     .or_insert_with(Vec::new)
                     .push(trn_str.clone());
             }
@@ -857,27 +805,15 @@ pub fn filter_by_platform(trns: &[Trn], platform: &crate::Platform) -> Vec<Trn> 
 /// Filter TRNs by scope
 pub fn filter_by_scope(trns: &[Trn], scope: &str) -> Vec<Trn> {
     trns.iter()
-        .filter(|trn| trn.scope().map_or(false, |s| s == scope))
+        .filter(|trn| trn.scope() == scope)
         .cloned()
         .collect()
 }
 
 /// Filter TRNs by tool type
-pub fn filter_by_tool_type(trns: &[Trn], tool_type: &crate::ToolType) -> Vec<Trn> {
-    let tool_type_str = match tool_type {
-        crate::ToolType::OpenApi => "openapi",
-        crate::ToolType::Workflow => "workflow",
-        crate::ToolType::Python => "python",
-        crate::ToolType::Shell => "shell",
-        crate::ToolType::System => "system",
-        crate::ToolType::Function => "function",
-        crate::ToolType::Composite => "composite",
-        crate::ToolType::AsyncApi => "async_api",
-        crate::ToolType::Custom(custom) => custom.as_str(),
-    };
-    
+pub fn filter_by_tool_type(trns: &[Trn], tool_type: &str) -> Vec<Trn> {
     trns.iter()
-        .filter(|trn| trn.resource_type() == "tool" && trn.type_() == tool_type_str)
+        .filter(|trn| trn.resource_type() == tool_type)
         .cloned()
         .collect()
 }
@@ -938,6 +874,13 @@ pub fn sort_trns_by_version(trns: &mut [String], reverse: bool) {
     });
 }
 
+/// Check if a version string is a common alias
+fn is_common_alias(version: &str) -> bool {
+    let common_aliases = ["latest", "stable", "beta", "alpha", "dev", "main", "master", 
+                         "current", "next", "preview", "rc", "snapshot", "nightly"];
+    common_aliases.contains(&version)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -966,9 +909,9 @@ mod tests {
     #[test]
     fn test_find_latest_version() {
         let trns = vec![
-            "trn:user:alice:tool:openapi:api:v1.0.0".to_string(),
-            "trn:user:alice:tool:openapi:api:v1.2.0".to_string(),
-            "trn:user:alice:tool:openapi:api:v1.1.5".to_string(),
+            "trn:user:alice:tool:myapi:v1.0.0".to_string(),
+            "trn:user:alice:tool:myapi:v1.2.0".to_string(),
+            "trn:user:alice:tool:myapi:v1.1.5".to_string(),
         ];
         
         let latest = find_latest_version(&trns).unwrap();
@@ -978,9 +921,9 @@ mod tests {
     #[test]
     fn test_group_trns() {
         let trns = vec![
-            "trn:user:alice:tool:openapi:api:v1.0".to_string(),
-            "trn:user:bob:tool:python:script:v2.0".to_string(),
-            "trn:org:company:tool:workflow:pipeline:latest".to_string(),
+            "trn:user:alice:tool:myapi:v1.0".to_string(),
+            "trn:user:bob:tool:myscript:v2.0".to_string(),
+            "trn:org:company:tool:workflow:latest".to_string(),
         ];
         
         let by_platform = group_trns_by_platform(&trns);
@@ -994,25 +937,23 @@ mod tests {
     #[test]
     fn test_trn_statistics() {
         let trns = vec![
-            "trn:user:alice:tool:openapi:api:v1.0@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
-            "trn:user:bob:tool:python:script:v2.0:beta".to_string(),
-            "trn:org:company:dataset:structured:data:latest".to_string(),
+            "trn:user:alice:tool:myapi:v1.0".to_string(),
+            "trn:user:bob:tool:myscript:v2.0".to_string(),
+            "trn:org:company:dataset:mydata:latest".to_string(),
         ];
         
         let stats = calculate_trn_statistics(&trns);
         assert_eq!(stats.total_count, 3);
         assert_eq!(stats.unique_platforms, 2);
         assert_eq!(stats.unique_resource_types, 2);
-        assert_eq!(stats.trns_with_hash, 1);
-        assert_eq!(stats.trns_with_tag, 1);
     }
 
     #[test]
     fn test_extract_unique_components() {
         let trns = vec![
-            "trn:user:alice:tool:openapi:api:v1.0".to_string(),
-            "trn:user:bob:tool:python:script:v2.0".to_string(),
-            "trn:org:company:dataset:structured:data:latest".to_string(),
+            "trn:user:alice:tool:myapi:v1.0".to_string(),
+            "trn:user:bob:tool:myscript:v2.0".to_string(),
+            "trn:org:company:dataset:mydata:latest".to_string(),
         ];
         
         let platforms = extract_unique_platforms(&trns);
@@ -1025,24 +966,21 @@ mod tests {
     #[test]
     fn test_sort_trns() {
         let mut trns = vec![
-            "trn:user:charlie:tool:openapi:api:v1.0".to_string(),
-            "trn:user:alice:tool:python:script:v2.0".to_string(),
-            "trn:user:bob:tool:workflow:pipeline:latest".to_string(),
+            "trn:user:bob:tool:myscript:v2.0".to_string(),
+            "trn:user:alice:tool:myapi:v1.0".to_string(),
+            "trn:org:company:dataset:mydata:latest".to_string(),
         ];
         
         sort_trns(&mut trns, TrnSortCriteria::Platform);
-        // All are user platform, so order should be preserved
+        assert!(trns[0].contains("org"));
         
-        // Test by instance ID
         sort_trns(&mut trns, TrnSortCriteria::InstanceId);
-        assert!(trns[0].contains("api"));
-        assert!(trns[1].contains("pipeline"));
-        assert!(trns[2].contains("script"));
+        assert!(trns[0].contains("myapi"));
     }
 
     #[test]
     fn test_generate_variants() {
-        let base = "trn:user:alice:tool:openapi:api:v1.0";
+        let base = "trn:user:alice:tool:myapi:v1.0";
         let versions = &["v2.0", "v3.0", "latest"];
         
         let variants = generate_trn_variants(base, versions).unwrap();
@@ -1053,7 +991,7 @@ mod tests {
 
     #[test]
     fn test_conversion_formats() {
-        let trn = "trn:user:alice:tool:openapi:github-api:v1.0";
+        let trn = "trn:user:alice:tool:myapi:v1.0";
         
         let standard = convert_trn_format(trn, TrnFormat::Standard).unwrap();
         assert_eq!(standard, trn);

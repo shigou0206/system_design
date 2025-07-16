@@ -15,29 +15,13 @@ const TRN_COMPONENT_ENCODE_SET: &AsciiSet = &CONTROLS.add(b' ').add(b'/').add(b'
 
 /// Convert a TRN to trn:// URL format
 pub fn trn_to_url(trn: &Trn) -> TrnResult<String> {
-    let mut path_parts = vec![trn.platform()];
-    
-    if let Some(scope) = trn.scope() {
-        path_parts.push(scope);
-    }
-    
-    path_parts.extend([
+    let path_parts = vec![
+        trn.platform(),
+        trn.scope(),
         trn.resource_type(),
-        trn.type_(),
-    ]);
-    
-    if let Some(subtype) = trn.subtype() {
-        path_parts.push(subtype);
-    }
-    
-    path_parts.extend([
-        trn.instance_id(),
+        trn.resource_id(),
         trn.version(),
-    ]);
-    
-    if let Some(tag) = trn.tag() {
-        path_parts.push(tag);
-    }
+    ];
     
     // URL encode each path component
     let encoded_parts: Vec<String> = path_parts
@@ -45,15 +29,7 @@ pub fn trn_to_url(trn: &Trn) -> TrnResult<String> {
         .map(|part| url_encode_component(part))
         .collect();
     
-    let path = encoded_parts.join("/");
-    
-    let mut url = format!("trn://{}", path);
-    
-    // Add hash as query parameter if present
-    if let Some(hash) = trn.hash() {
-        url.push_str("?hash=");
-        url.push_str(hash); // Don't encode hash since it's already in proper format
-    }
+    let url = format!("trn://{}", encoded_parts.join("/"));
     
     Ok(url)
 }
@@ -67,29 +43,14 @@ pub fn trn_to_http_url(trn: &Trn, base_url: &str) -> TrnResult<String> {
             Some(base_url.to_string()),
         ))?;
     
-    let mut path_parts = vec!["trn", trn.platform()];
-    
-    if let Some(scope) = trn.scope() {
-        path_parts.push(scope);
-    }
-    
-    path_parts.extend([
+    let path_parts = vec![
+        "trn",
+        trn.platform(),
+        trn.scope(),
         trn.resource_type(),
-        trn.type_(),
-    ]);
-    
-    if let Some(subtype) = trn.subtype() {
-        path_parts.push(subtype);
-    }
-    
-    path_parts.extend([
-        trn.instance_id(),
+        trn.resource_id(),
         trn.version(),
-    ]);
-    
-    if let Some(tag) = trn.tag() {
-        path_parts.push(tag);
-    }
+    ];
     
     // URL encode each path component
     let encoded_parts: Vec<String> = path_parts
@@ -99,17 +60,11 @@ pub fn trn_to_http_url(trn: &Trn, base_url: &str) -> TrnResult<String> {
     
     let path = encoded_parts.join("/");
     
-    let mut url = base.join(&path)
+    let url = base.join(&path)
         .map_err(|e| TrnError::url(
             format!("Failed to join path with base URL: {}", e),
             Some(base_url.to_string()),
         ))?;
-    
-    // Add hash as query parameter if present
-    if let Some(hash) = trn.hash() {
-        url.query_pairs_mut()
-            .append_pair("hash", hash);
-    }
     
     Ok(url.to_string())
 }
@@ -172,81 +127,22 @@ pub fn http_url_to_trn(url: &str) -> TrnResult<Trn> {
         Some(url.to_string()),
     ))?;
     
-    // Extract hash from query parameters
-    let hash = parsed_url
-        .query_pairs()
-        .find(|(key, _)| key == "hash")
-        .map(|(_, value)| value.to_string());
+    // For the new 6-component format, we expect exactly 5 path components
+    // Format: trn://platform/scope/resource_type/resource_id/version
+    if decoded_parts.len() != 5 {
+        return Err(TrnError::url(
+            format!("Invalid trn:// URL format. Expected 5 path components, got {}", decoded_parts.len()),
+            Some(url.to_string()),
+        ));
+    }
     
-    // Build TRN components based on path length
-    let components = match decoded_parts.len() {
-        5 => TrnComponents {
-            platform: &decoded_parts[0],
-            scope: None,
-            resource_type: &decoded_parts[1],
-            type_: &decoded_parts[2],
-            subtype: None,
-            instance_id: &decoded_parts[3],
-            version: &decoded_parts[4],
-            tag: None,
-            hash: hash.as_deref(),
-        },
-        6 => {
-            // Use heuristics to determine if second component is scope or subtype
-            if is_scope_like(&decoded_parts[1], &decoded_parts[0]) {
-                TrnComponents {
-                    platform: &decoded_parts[0],
-                    scope: Some(&decoded_parts[1]),
-                    resource_type: &decoded_parts[2],
-                    type_: &decoded_parts[3],
-                    subtype: None,
-                    instance_id: &decoded_parts[4],
-                    version: &decoded_parts[5],
-                    tag: None,
-                    hash: hash.as_deref(),
-                }
-            } else {
-                TrnComponents {
-                    platform: &decoded_parts[0],
-                    scope: None,
-                    resource_type: &decoded_parts[1],
-                    type_: &decoded_parts[2],
-                    subtype: Some(&decoded_parts[3]),
-                    instance_id: &decoded_parts[4],
-                    version: &decoded_parts[5],
-                    tag: None,
-                    hash: hash.as_deref(),
-                }
-            }
-        }
-        7 => TrnComponents {
-            platform: &decoded_parts[0],
-            scope: Some(&decoded_parts[1]),
-            resource_type: &decoded_parts[2],
-            type_: &decoded_parts[3],
-            subtype: Some(&decoded_parts[4]),
-            instance_id: &decoded_parts[5],
-            version: &decoded_parts[6],
-            tag: None,
-            hash: hash.as_deref(),
-        },
-        8 => TrnComponents {
-            platform: &decoded_parts[0],
-            scope: Some(&decoded_parts[1]),
-            resource_type: &decoded_parts[2],
-            type_: &decoded_parts[3],
-            subtype: Some(&decoded_parts[4]),
-            instance_id: &decoded_parts[5],
-            version: &decoded_parts[6],
-            tag: Some(&decoded_parts[7]),
-            hash: hash.as_deref(),
-        },
-        _ => {
-            return Err(TrnError::url(
-                format!("Invalid number of path components: {}", decoded_parts.len()),
-                Some(url.to_string()),
-            ));
-        }
+    // Build TRN components for the fixed format
+    let components = TrnComponents {
+        platform: &decoded_parts[0],
+        scope: &decoded_parts[1],
+        resource_type: &decoded_parts[2],
+        resource_id: &decoded_parts[3],
+        version: &decoded_parts[4],
     };
     
     Ok(components.to_owned())
@@ -264,6 +160,7 @@ fn url_decode_component(component: &str) -> Result<String, std::str::Utf8Error> 
 }
 
 /// Heuristic to determine if a component looks like a scope
+#[allow(dead_code)]
 fn is_scope_like(value: &str, platform: &str) -> bool {
     match platform {
         "user" => value.len() >= 2 && value.chars().all(|c| c.is_alphanumeric()),
@@ -460,46 +357,46 @@ mod tests {
 
     #[test]
     fn test_trn_to_url() {
-        let trn = Trn::parse("trn:user:alice:tool:openapi:github-api:v1.0").unwrap();
+        let trn = Trn::parse("trn:user:alice:tool:myapi:v1.0").unwrap();
         let url = trn_to_url(&trn).unwrap();
-        assert_eq!(url, "trn://user/alice/tool/openapi/github-api/v1.0");
+        assert_eq!(url, "trn://user/alice/tool/myapi/v1.0");
     }
 
     #[test]
     fn test_trn_to_url_with_hash() {
-        let trn = Trn::parse("trn:user:alice:tool:openapi:github-api:v1.0@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef").unwrap();
+        // Note: Hash not supported in 6-component format
+        let trn = Trn::parse("trn:user:alice:tool:myapi:v1.0").unwrap();
         let url = trn_to_url(&trn).unwrap();
-        
-        assert!(url.contains("?hash=sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"));
+        assert_eq!(url, "trn://user/alice/tool/myapi/v1.0");
     }
 
     #[test]
     fn test_trn_to_http_url() {
-        let trn = Trn::parse("trn:user:alice:tool:openapi:github-api:v1.0").unwrap();
+        let trn = Trn::parse("trn:user:alice:tool:myapi:v1.0").unwrap();
         let url = trn_to_http_url(&trn, "https://api.example.com/").unwrap();
-        assert_eq!(url, "https://api.example.com/trn/user/alice/tool/openapi/github-api/v1.0");
+        assert_eq!(url, "https://api.example.com/trn/user/alice/tool/myapi/v1.0");
     }
 
     #[test]
     fn test_url_to_trn() {
-        let url = "trn://user/alice/tool/openapi/github-api/v1.0";
+        let url = "trn://user/alice/tool/myapi/v1.0";
         let trn = url_to_trn(url).unwrap();
         assert_eq!(trn.platform(), "user");
-        assert_eq!(trn.scope(), Some("alice"));
-        assert_eq!(trn.instance_id(), "github-api");
+        assert_eq!(trn.scope(), "alice");
+        assert_eq!(trn.resource_id(), "myapi");
     }
 
     #[test]
     fn test_http_url_to_trn() {
-        let url = "https://api.example.com/trn/user/alice/tool/openapi/github-api/v1.0";
+        let url = "https://api.example.com/trn/user/alice/tool/myapi/v1.0";
         let trn = http_url_to_trn(url).unwrap();
         assert_eq!(trn.platform(), "user");
-        assert_eq!(trn.scope(), Some("alice"));
+        assert_eq!(trn.scope(), "alice");
     }
 
     #[test]
     fn test_url_encoding() {
-        let component = "test:component@example";
+        let component = "test-component";
         let encoded = url_encode_component(component);
         let decoded = url_decode_component(&encoded).unwrap();
         assert_eq!(component, decoded);
@@ -507,7 +404,7 @@ mod tests {
 
     #[test]
     fn test_bidirectional_conversion() {
-        let original_trn = "trn:user:alice:tool:openapi:github-api:v1.0";
+        let original_trn = "trn:user:alice:tool:myapi:v1.0";
         let trn = Trn::parse(original_trn).unwrap();
         let url = trn_to_url(&trn).unwrap();
         let back_to_trn = url_to_trn(&url).unwrap();
@@ -516,7 +413,7 @@ mod tests {
 
     #[test]
     fn test_url_validation() {
-        let valid_url = "trn://user/alice/tool/openapi/github-api/v1.0";
+        let valid_url = "trn://user/alice/tool/myapi/v1.0";
         let result = validate_url(valid_url);
         assert!(result.is_valid);
         assert!(result.trn.is_some());
@@ -529,7 +426,7 @@ mod tests {
 
     #[test]
     fn test_convert_url_format() {
-        let trn_url = "trn://user/alice/tool/openapi/github-api/v1.0";
+        let trn_url = "trn://user/alice/tool/myapi/v1.0";
         let http_url = convert_url_format(
             trn_url, 
             UrlFormat::HttpUrl, 

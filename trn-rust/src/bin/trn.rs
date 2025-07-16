@@ -7,7 +7,7 @@
 use clap::{Parser, Subcommand};
 
 #[cfg(feature = "cli")]
-use trn_rust::{parse, validate, ValidationReport};
+use trn_rust::{Trn, generate_validation_report};
 
 #[cfg(feature = "cli")]
 #[derive(Parser)]
@@ -68,156 +68,178 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli.command {
         Commands::Parse { trn, format } => {
-            handle_parse(&trn, &format)?;
+            parse_command(&trn, &format)?;
         }
         Commands::Validate { trns, stdin, format } => {
-            if stdin {
-                handle_validate_stdin(&format)?;
-            } else {
-                handle_validate(&trns, &format)?;
-            }
+            validate_command(trns, stdin, &format)?;
         }
         Commands::Convert { trn, base_url, target } => {
-            handle_convert(&trn, base_url.as_deref(), &target)?;
+            convert_command(&trn, base_url.as_deref(), &target)?;
         }
         Commands::Info { trn, format } => {
-            handle_info(&trn, &format)?;
+            info_command(&trn, &format)?;
         }
     }
 
     Ok(())
 }
 
+#[cfg(not(feature = "cli"))]
+fn main() {
+    eprintln!("CLI feature not enabled. Please build with --features cli");
+    std::process::exit(1);
+}
+
 #[cfg(feature = "cli")]
-fn handle_parse(trn_str: &str, format: &str) -> Result<(), Box<dyn std::error::Error>> {
-    match parse(trn_str) {
+fn parse_command(trn_str: &str, format: &str) -> Result<(), Box<dyn std::error::Error>> {
+    match Trn::parse(trn_str) {
         Ok(trn) => {
             match format {
                 "json" => {
-                    let json = serde_json::to_string_pretty(&trn)?;
-                    println!("{}", json);
+                    let output = serde_json::json!({
+                        "success": true,
+                        "trn": trn.to_string(),
+                        "components": {
+                            "platform": trn.platform(),
+                            "scope": trn.scope(),
+                            "resource_type": trn.resource_type(),
+                            "resource_id": trn.resource_id(),
+                            "version": trn.version(),
+                        }
+                    });
+                    println!("{}", serde_json::to_string_pretty(&output)?);
                 }
                 "yaml" => {
-                    let yaml = serde_yaml::to_string(&trn)?;
-                    println!("{}", yaml);
+                    #[cfg(feature = "cli")]
+                    {
+                        let output = serde_yaml::to_string(&trn)?;
+                        println!("{}", output);
+                    }
+                    #[cfg(not(feature = "cli"))]
+                    {
+                        eprintln!("YAML output requires CLI feature");
+                        return Err("YAML not supported".into());
+                    }
                 }
                 _ => {
-                    println!("✓ Valid TRN: {}", trn);
-                    println!("  Platform: {}", trn.platform());
-                    if let Some(scope) = trn.scope() {
-                        println!("  Scope: {}", scope);
+                    println!("✅ TRN is valid");
+                    println!("Platform: {}", trn.platform());
+                    println!("Scope: {}", trn.scope());
+                    println!("Resource Type: {}", trn.resource_type());
+                    println!("Resource ID: {}", trn.resource_id());
+                    println!("Version: {}", trn.version());
+                    
+                    // Display URLs
+                    if let Ok(trn_url) = trn.to_url() {
+                        println!("TRN URL: {}", trn_url);
                     }
-                    println!("  Resource Type: {}", trn.resource_type());
-                    println!("  Type: {}", trn.type_());
-                    if let Some(subtype) = trn.subtype() {
-                        println!("  Subtype: {}", subtype);
-                    }
-                    println!("  Instance ID: {}", trn.instance_id());
-                    println!("  Version: {}", trn.version());
-                    if let Some(tag) = trn.tag() {
-                        println!("  Tag: {}", tag);
-                    }
-                    if let Some(hash) = trn.hash() {
-                        println!("  Hash: {}", hash);
-                    }
+                    
+                    println!("Base TRN: {}", trn.base_trn().to_string());
                 }
             }
         }
         Err(e) => {
-            eprintln!("✗ Invalid TRN: {}", e);
-            std::process::exit(1);
-        }
-    }
-    Ok(())
-}
-
-#[cfg(feature = "cli")]
-fn handle_validate(trns: &[String], format: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let report = trn_rust::batch_validate(trns);
-    
-    match format {
-        "json" => {
-            let json = serde_json::to_string_pretty(&report)?;
-            println!("{}", json);
-        }
-        "yaml" => {
-            let yaml = serde_yaml::to_string(&report)?;
-            println!("{}", yaml);
-        }
-        _ => {
-            println!("Validation Report:");
-            println!("  Total: {}", report.total);
-            println!("  Valid: {} ({}%)", report.valid, 
-                     (report.valid as f64 / report.total as f64 * 100.0) as u32);
-            println!("  Invalid: {} ({}%)", report.invalid, 
-                     (report.invalid as f64 / report.total as f64 * 100.0) as u32);
-            println!("  Duration: {}ms", report.stats.duration_ms);
-            println!("  Rate: {:.1} TRNs/sec", report.stats.rate_per_second);
-            
-            if !report.errors.is_empty() {
-                println!("\nErrors:");
-                for error in &report.errors {
-                    println!("  ✗ {}: {}", error.trn, error.error);
-                    if let Some(suggestion) = &error.suggestion {
-                        println!("    💡 {}", suggestion);
-                    }
+            match format {
+                "json" => {
+                    let output = serde_json::json!({
+                        "success": false,
+                        "error": e.to_string(),
+                        "input": trn_str
+                    });
+                    println!("{}", serde_json::to_string_pretty(&output)?);
+                }
+                _ => {
+                    eprintln!("❌ Invalid TRN: {}", e);
+                    std::process::exit(1);
                 }
             }
         }
     }
-    
-    if report.invalid > 0 {
-        std::process::exit(1);
-    }
-    
     Ok(())
 }
 
 #[cfg(feature = "cli")]
-fn handle_validate_stdin(format: &str) -> Result<(), Box<dyn std::error::Error>> {
-    use std::io::{self, BufRead};
-    
-    let stdin = io::stdin();
-    let trns: Vec<String> = stdin.lock()
-        .lines()
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .filter(|line| !line.trim().is_empty())
-        .collect();
-    
-    handle_validate(&trns, format)
+fn validate_command(
+    mut trns: Vec<String>,
+    stdin: bool,
+    format: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if stdin {
+        use std::io::{self, Read};
+        let mut buffer = String::new();
+        io::stdin().read_to_string(&mut buffer)?;
+        trns.extend(
+            buffer
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .map(|line| line.trim().to_string()),
+        );
+    }
+
+    let report = generate_validation_report(&trns);
+
+    match format {
+        "json" => {
+            let output = serde_json::json!({
+                "total": report.total,
+                "valid": report.valid,
+                "invalid": report.invalid,
+                "errors": report.errors,
+                "duration_ms": report.stats.duration_ms,
+                "rate_per_second": report.stats.rate_per_second
+            });
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
+        _ => {
+            println!("📊 Validation Report");
+            println!("Total TRNs: {}", report.total);
+            println!("✅ Valid: {}", report.valid);
+            println!("❌ Invalid: {}", report.invalid);
+            println!("⏱️  Duration: {}ms", report.stats.duration_ms);
+            println!("🚀 Rate: {:.2} TRNs/second", report.stats.rate_per_second);
+
+            if !report.errors.is_empty() {
+                println!("\n🔍 Errors:");
+                for (i, error) in report.errors.iter().enumerate() {
+                    println!("  {}. {}", i + 1, error);
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(feature = "cli")]
-fn handle_convert(trn_str: &str, base_url: Option<&str>, target: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let trn = parse(trn_str)?;
-    
+fn convert_command(
+    trn_str: &str,
+    base_url: Option<&str>,
+    target: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let trn = Trn::parse(trn_str)?;
+
     match target {
         "trn-url" => {
             let url = trn.to_url()?;
             println!("{}", url);
         }
         "http-url" => {
-            if let Some(base) = base_url {
-                let url = trn.to_http_url(base)?;
-                println!("{}", url);
-            } else {
-                eprintln!("Error: --base-url is required for http-url conversion");
-                std::process::exit(1);
-            }
+            let base = base_url.unwrap_or("https://trn.example.com");
+            let url = trn.to_http_url(base)?;
+            println!("{}", url);
         }
         _ => {
-            eprintln!("Error: Invalid target format. Use 'trn-url' or 'http-url'");
+            eprintln!("Invalid target format. Use 'trn-url' or 'http-url'");
             std::process::exit(1);
         }
     }
-    
+
     Ok(())
 }
 
 #[cfg(feature = "cli")]
-fn handle_info(trn_str: &str, format: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let trn = parse(trn_str)?;
+fn info_command(trn_str: &str, format: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let trn = Trn::parse(trn_str)?;
     
     match format {
         "json" => {
@@ -227,62 +249,56 @@ fn handle_info(trn_str: &str, format: &str) -> Result<(), Box<dyn std::error::Er
                     "platform": trn.platform(),
                     "scope": trn.scope(),
                     "resource_type": trn.resource_type(),
-                    "type": trn.type_(),
-                    "subtype": trn.subtype(),
-                    "instance_id": trn.instance_id(),
+                    "resource_id": trn.resource_id(),
                     "version": trn.version(),
-                    "tag": trn.tag(),
-                    "hash": trn.hash(),
                 },
                 "urls": {
                     "trn_url": trn.to_url().ok(),
                     "base_trn": trn.base_trn().to_string(),
                 },
                 "validation": {
-                    "is_valid": trn.is_valid(),
+                    "is_valid": true,
                 }
             });
             println!("{}", serde_json::to_string_pretty(&info)?);
         }
         "yaml" => {
-            let info = serde_yaml::to_value(&trn)?;
-            println!("{}", serde_yaml::to_string(&info)?);
+            #[cfg(feature = "cli")]
+            {
+                let info = serde_yaml::to_value(&trn)?;
+                println!("{}", serde_yaml::to_string(&info)?);
+            }
+            #[cfg(not(feature = "cli"))]
+            {
+                eprintln!("YAML output requires CLI feature");
+                return Err("YAML not supported".into());
+            }
         }
         _ => {
-            println!("TRN Information:");
-            println!("  Full TRN: {}", trn);
-            println!("  Base TRN: {}", trn.base_trn());
-            if let Ok(url) = trn.to_url() {
-                println!("  TRN URL: {}", url);
-            }
-            println!("  Valid: {}", if trn.is_valid() { "✓" } else { "✗" });
-            
-            println!("\nComponents:");
+            println!("🔍 TRN Information");
+            println!("TRN: {}", trn.to_string());
+            println!();
+            println!("📋 Components:");
             println!("  Platform: {}", trn.platform());
-            if let Some(scope) = trn.scope() {
-                println!("  Scope: {}", scope);
-            }
+            println!("  Scope: {}", trn.scope());
             println!("  Resource Type: {}", trn.resource_type());
-            println!("  Type: {}", trn.type_());
-            if let Some(subtype) = trn.subtype() {
-                println!("  Subtype: {}", subtype);
-            }
-            println!("  Instance ID: {}", trn.instance_id());
+            println!("  Resource ID: {}", trn.resource_id());
             println!("  Version: {}", trn.version());
-            if let Some(tag) = trn.tag() {
-                println!("  Tag: {}", tag);
+            println!();
+            
+            if let Ok(trn_url) = trn.to_url() {
+                println!("🔗 URLs:");
+                println!("  TRN URL: {}", trn_url);
+                if let Ok(http_url) = trn.to_http_url("https://platform.example.com") {
+                    println!("  HTTP URL: {}", http_url);
+                }
             }
-            if let Some(hash) = trn.hash() {
-                println!("  Hash: {}", hash);
-            }
+            
+            println!();
+            println!("🎯 Base TRN: {}", trn.base_trn().to_string());
+            println!("✅ Status: Valid");
         }
     }
     
     Ok(())
-}
-
-#[cfg(not(feature = "cli"))]
-fn main() {
-    eprintln!("CLI feature is not enabled. Please compile with --features cli");
-    std::process::exit(1);
 } 

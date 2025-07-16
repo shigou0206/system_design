@@ -1,416 +1,267 @@
-use trn_rust::*;
-
-// =================================
-// Basic Validation Tests
-// =================================
-
-#[test]
-fn test_is_valid_trn() {
-    // Valid TRN formats
-    assert!(is_valid_trn("trn:aiplatform:model:bert:base-model:v1.0"));
-    assert!(is_valid_trn("trn:user:alice:tool:openapi:github-api:v1.0"));
-    assert!(is_valid_trn("trn:org:company:dataset:csv:sales-data:v2.0"));
-    assert!(is_valid_trn("trn:user:alice:tool:openapi:github-api:v1.0@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"));
-    
-    // Invalid TRN formats
-    assert!(!is_valid_trn("invalid-trn"));
-    assert!(!is_valid_trn("trn:user")); // Too few components
-    assert!(!is_valid_trn("not-trn:user:alice:tool:openapi:github-api:v1.0")); // Wrong prefix
-    assert!(!is_valid_trn("")); // Empty string
-    assert!(!is_valid_trn("trn::tool:openapi:github-api:v1.0")); // Empty platform
-}
+use trn_rust::{
+    Trn, is_valid_trn, validate_trn_string, validate_trn_struct,
+    validate_multiple_trns, generate_validation_report, check_component_format,
+    validate_naming_conventions, ValidationCache
+};
 
 #[test]
-fn test_validate_convenience_function() {
-    // Test validation through convenience function
-    assert!(validate("trn:aiplatform:model:bert:base-model:v1.0").is_ok());
-    assert!(validate("trn:user:alice:tool:openapi:github-api:v1.0").is_ok());
-    
-    // Test invalid TRNs
-    assert!(validate("invalid-trn").is_err());
-    assert!(validate("").is_err());
-    
-    // Test validation with TRN object
-    let trn = Trn::parse("trn:user:alice:tool:openapi:github-api:v1.0").unwrap();
-    assert!(validate(&trn).is_ok());
-}
-
-#[test]
-fn test_trn_validate_method() {
-    // Test TRN's validate method
-    let valid_trn = Trn::parse("trn:user:alice:tool:openapi:github-api:v1.0").unwrap();
-    assert!(valid_trn.validate().is_ok());
-    assert!(valid_trn.is_valid());
-}
-
-// =================================
-// TrnValidator Tests
-// =================================
-
-#[test]
-fn test_trn_validator_basic() {
-    let validator = TrnValidator::new();
-    
-    // Test valid TRNs
-    assert!(validator.validate("trn:aiplatform:model:bert:base-model:v1.0").is_ok());
-    assert!(validator.validate("trn:user:alice:tool:openapi:github-api:v1.0").is_ok());
-    assert!(validator.is_valid("trn:org:company:dataset:csv:sales-data:v2.0"));
-    
-    // Test invalid TRNs
-    assert!(validator.validate("invalid-trn").is_err());
-    assert!(!validator.is_valid("trn:user")); // Too few components
-    assert!(!validator.is_valid("")); // Empty string
-}
-
-#[test]
-fn test_trn_validator_default() {
-    let validator = TrnValidator::new();
-    
-    assert!(validator.validate("trn:user:alice:tool:openapi:github-api:v1.0").is_ok());
-    assert!(validator.is_valid("trn:aiplatform:model:bert:base-model:v1.0"));
-}
-
-#[test]
-fn test_trn_validator_cache_stats() {
-    let validator = TrnValidator::new();
-    
-    // Perform some validations
-    validator.is_valid("trn:user:alice:tool:openapi:github-api:v1.0");
-    validator.is_valid("trn:aiplatform:model:bert:base-model:v1.0");
-    validator.is_valid("invalid-trn");
-    
-    // Check cache stats (just verify cache is accessible)
-    let stats = validator.cache_stats();
-    assert!(stats.max_size > 0); // Cache should have a positive max size
-}
-
-// =================================
-// Batch Validation Tests
-// =================================
-
-#[test]
-fn test_batch_validate() {
-    let trns = vec![
-        "trn:aiplatform:model:bert:base-model:v1.0".to_string(),
-        "trn:user:alice:tool:openapi:github-api:v1.0".to_string(),
-        "trn:org:company:dataset:csv:sales-data:v2.0".to_string(),
-        "invalid-trn".to_string(),
-        "trn:user".to_string(), // Too few components
+fn test_valid_trns() {
+    let valid_cases = vec![
+        "trn:user:alice:tool:myapi:v1.0",
+        "trn:org:company:model:bert:v2.1",
+        "trn:aiplatform:system:dataset:training:latest",
+        "trn:user:bob:pipeline:etl:main",
+        "trn:org:startup:tool:analyzer:dev",
     ];
     
-    let report = batch_validate(&trns);
+    for trn_str in valid_cases {
+        assert!(is_valid_trn(trn_str), "Should be valid: {}", trn_str);
+        assert!(validate_trn_string(trn_str).is_ok(), "Should validate: {}", trn_str);
+    }
+}
+
+#[test]
+fn test_invalid_format() {
+    let invalid_cases = vec![
+        ("", "empty string"),
+        ("invalid", "not trn format"),
+        ("trn:user:alice", "too few components"),
+        ("trn:user:alice:tool:myapi:v1.0:extra", "too many components"),
+        ("nottrn:user:alice:tool:myapi:v1.0", "wrong prefix"),
+    ];
     
+    for (trn_str, reason) in invalid_cases {
+        assert!(!is_valid_trn(trn_str), "Should be invalid ({}): {}", reason, trn_str);
+        assert!(validate_trn_string(trn_str).is_err(), "Should fail validation ({}): {}", reason, trn_str);
+    }
+}
+
+#[test]
+fn test_empty_components() {
+    let invalid_cases = vec![
+        ("trn::alice:tool:myapi:v1.0", "empty platform"),
+        ("trn:user::tool:myapi:v1.0", "empty scope"),
+        ("trn:user:alice::myapi:v1.0", "empty resource type"),
+        ("trn:user:alice:tool::v1.0", "empty resource id"),
+        ("trn:user:alice:tool:myapi:", "empty version"),
+    ];
+    
+    for (trn_str, reason) in invalid_cases {
+        assert!(!is_valid_trn(trn_str), "Should be invalid ({}): {}", reason, trn_str);
+    }
+}
+
+#[test]
+fn test_component_length_validation() {
+    // Test very long components
+    let long_platform = "a".repeat(100);
+    let long_scope = "b".repeat(100);
+    let long_resource_type = "c".repeat(100);
+    let long_resource_id = "d".repeat(200);
+    let long_version = "e".repeat(100);
+    
+    let test_cases = vec![
+        (format!("trn:{}:alice:tool:myapi:v1.0", long_platform), "platform too long"),
+        (format!("trn:user:{}:tool:myapi:v1.0", long_scope), "scope too long"),
+        (format!("trn:user:alice:{}:myapi:v1.0", long_resource_type), "resource type too long"),
+        (format!("trn:user:alice:tool:{}:v1.0", long_resource_id), "resource id too long"),
+        (format!("trn:user:alice:tool:myapi:{}", long_version), "version too long"),
+    ];
+    
+    for (trn_str, reason) in test_cases {
+        let _result = validate_trn_string(&trn_str);
+        // Should either fail parsing or validation
+        if let Ok(trn) = Trn::parse(&trn_str) {
+            assert!(trn.validate().is_err(), "Should fail validation ({}): {}", reason, trn_str);
+        }
+    }
+}
+
+#[test]
+fn test_naming_conventions() {
+    let test_cases = vec![
+        ("trn:USER:alice:tool:myapi:v1.0", true, "uppercase platform allowed"),
+        ("trn:user:ALICE:tool:myapi:v1.0", true, "uppercase scope allowed"),
+        ("trn:user:alice:tool:myapi:v1.0", true, "lowercase resource type required"),
+        ("trn:user:alice:tool:MYAPI:v1.0", true, "uppercase resource id allowed"),
+        ("trn:user:alice:tool:myapi:V1.0", true, "uppercase version allowed"),
+    ];
+    
+    for (trn_str, should_pass, reason) in test_cases {
+        let trn = Trn::parse(trn_str).unwrap();
+        let result = validate_naming_conventions(&trn);
+        
+        if should_pass {
+            assert!(result.is_ok(), "Should pass {}: {}", reason, trn_str);
+        } else {
+            assert!(result.is_err(), "Should fail {}: {}", reason, trn_str);
+        }
+    }
+}
+
+#[test]
+fn test_reserved_words() {
+    // Test reserved words (using actual reserved words)
+    let reserved_cases = vec![
+        "trn:trn:alice:tool:myapi:v1.0",        // reserved platform
+        "trn:null:alice:tool:myapi:v1.0",       // reserved platform
+        "trn:void:alice:tool:myapi:v1.0",       // reserved platform
+        "trn:user:null:tool:myapi:v1.0",        // reserved scope
+        "trn:user:undefined:tool:myapi:v1.0",   // reserved scope
+    ];
+    
+    for trn_str in reserved_cases {
+        assert!(!is_valid_trn(trn_str), "Should reject reserved word: {}", trn_str);
+    }
+}
+
+#[test]
+fn test_platform_specific_validation() {
+    // Test user platform validation
+    let user_cases = vec![
+        ("trn:user:a:tool:myapi:v1.0", false, "scope too short"),
+        ("trn:user:alice:tool:myapi:v1.0", true, "valid user scope"),
+        ("trn:user:a_very_long_username_that_exceeds_limit:tool:myapi:v1.0", false, "scope too long"),
+    ];
+    
+    for (trn_str, should_pass, reason) in user_cases {
+        let result = is_valid_trn(trn_str);
+        if should_pass {
+            assert!(result, "Should pass ({}): {}", reason, trn_str);
+        } else {
+            assert!(!result, "Should fail ({}): {}", reason, trn_str);
+        }
+    }
+}
+
+#[test]
+fn test_version_format_validation() {
+    let version_cases = vec![
+        ("trn:user:alice:tool:myapi:v1.0", true, "semantic version"),
+        ("trn:user:alice:tool:myapi:latest", true, "latest alias"),
+        ("trn:user:alice:tool:myapi:dev", true, "dev alias"),
+        ("trn:user:alice:tool:myapi:main", true, "main alias"),
+        ("trn:user:alice:tool:myapi:1.2.3", true, "numeric version"),
+        ("trn:user:alice:tool:myapi:v2.0-beta", true, "pre-release version"),
+        ("trn:user:alice:tool:myapi:feature-branch", true, "feature branch"),
+        ("trn:user:alice:tool:myapi:", false, "empty version"),
+    ];
+    
+    for (trn_str, should_pass, reason) in version_cases {
+        let result = is_valid_trn(trn_str);
+        if should_pass {
+            assert!(result, "Should pass ({}): {}", reason, trn_str);
+        } else {
+            assert!(!result, "Should fail ({}): {}", reason, trn_str);
+        }
+    }
+}
+
+#[test]
+fn test_batch_validation() {
+    let trns = vec![
+        "trn:user:alice:tool:myapi:v1.0".to_string(),
+        "invalid:format".to_string(),
+        "trn:org:company:model:bert:v2.1".to_string(),
+        "trn:user::tool:myapi:v1.0".to_string(),  // Empty scope
+        "trn:aiplatform:system:dataset:training:latest".to_string(),
+    ];
+    
+    let results = validate_multiple_trns(&trns);
+    assert_eq!(results.len(), 5);
+    
+    // Check individual results
+    assert!(results[0].is_ok()); // Valid TRN
+    assert!(results[1].is_err()); // Invalid format
+    assert!(results[2].is_ok()); // Valid TRN
+    assert!(results[3].is_err()); // Empty scope
+    assert!(results[4].is_ok()); // Valid TRN
+    
+    // Generate report
+    let report = generate_validation_report(&trns);
     assert_eq!(report.total, 5);
-    assert_eq!(report.valid, 3); // First 3 are valid
-    assert_eq!(report.invalid, 2); // Last 2 are invalid
-    assert!(report.success_count == 3);
-    assert!(report.success_count < report.total);
-}
-
-#[test]
-fn test_batch_validate_all_valid() {
-    let trns = vec![
-        "trn:aiplatform:model:bert:base-model:v1.0".to_string(),
-        "trn:user:alice:tool:openapi:github-api:v1.0".to_string(),
-        "trn:org:company:dataset:csv:sales-data:v2.0".to_string(),
-    ];
-    
-    let report = batch_validate(&trns);
-    
-    assert_eq!(report.total, 3);
     assert_eq!(report.valid, 3);
-    assert_eq!(report.invalid, 0);
-    assert_eq!(report.success_count, 3);
-    assert_eq!(report.success_count, report.total);
+    assert_eq!(report.invalid, 2);
+    assert_eq!(report.errors.len(), 2);
 }
 
 #[test]
-fn test_batch_validate_all_invalid() {
-    let trns = vec![
-        "invalid-trn".to_string(),
-        "not-trn:user:alice".to_string(),
-        "trn:user".to_string(),
-        "".to_string(),
-    ];
+fn test_validation_cache() {
+    let cache = ValidationCache::new(100, 60);
     
-    let report = batch_validate(&trns);
+    // Test cache miss
+    assert_eq!(cache.get("test_trn"), None);
     
-    assert_eq!(report.total, 4);
-    assert_eq!(report.valid, 0);
-    assert_eq!(report.invalid, 4);
-    assert_eq!(report.success_count, 0);
+    // Insert and test cache hit
+    cache.insert("test_trn".to_string(), true);
+    assert_eq!(cache.get("test_trn"), Some(true));
+    
+    // Insert invalid result
+    cache.insert("invalid_trn".to_string(), false);
+    assert_eq!(cache.get("invalid_trn"), Some(false));
+    
+    // Test cache stats
+    let stats = cache.stats();
+    assert_eq!(stats.total_entries, 2);
 }
 
 #[test]
-fn test_batch_validate_empty() {
-    let trns: Vec<String> = vec![];
-    let report = batch_validate(&trns);
-    
-    assert_eq!(report.total, 0);
-    assert_eq!(report.valid, 0);
-    assert_eq!(report.invalid, 0);
-    assert_eq!(report.success_count, 0);
-    assert_eq!(report.success_count, report.total);
-}
-
-// =================================
-// Component Validation Tests
-// =================================
-
-#[test]
-fn test_is_valid_identifier() {
-    // Valid identifiers
-    assert!(is_valid_identifier("github-api"));
-    assert!(is_valid_identifier("base-model"));
-    assert!(is_valid_identifier("openapi"));
-    assert!(is_valid_identifier("bert"));
-    assert!(is_valid_identifier("api-v2"));
-    assert!(is_valid_identifier("user123"));
-    
-    // Invalid identifiers
-    assert!(!is_valid_identifier(""));
-    assert!(!is_valid_identifier("invalid@id"));
-    assert!(!is_valid_identifier("invalid.id"));
-    assert!(!is_valid_identifier("invalid/id"));
-    assert!(!is_valid_identifier("invalid id")); // Space
+fn test_trn_struct_validation() {
+    // Valid TRN
+    let valid_trn = Trn::new("user", "alice", "tool", "myapi", "v1.0").unwrap();
+    assert!(validate_trn_struct(&valid_trn).is_ok());
 }
 
 #[test]
-fn test_is_valid_scope() {
-    // Valid scopes
-    assert!(is_valid_scope("alice"));
-    assert!(is_valid_scope("company"));
-    assert!(is_valid_scope("user-123"));
-    assert!(is_valid_scope("org-name"));
-    assert!(is_valid_scope("enterprise"));
+fn test_component_format_check() {
+    let trn = Trn::new("user", "alice", "tool", "myapi", "v1.0").unwrap();
+    let components = trn.components();
     
-    // Invalid scopes  
-    assert!(!is_valid_scope(""));
-    assert!(!is_valid_scope("invalid@scope"));
-    assert!(!is_valid_scope("invalid.scope"));
-    assert!(!is_valid_scope("invalid/scope"));
-    assert!(!is_valid_scope("invalid scope")); // Space
+    let issues = check_component_format(&components);
+    assert!(issues.is_empty(), "Valid TRN should have no format issues");
 }
-
-#[test]
-fn test_is_valid_version() {
-    // Valid versions
-    assert!(is_valid_version("v1.0"));
-    assert!(is_valid_version("v2.0.0"));
-    assert!(is_valid_version("latest"));
-    assert!(is_valid_version("1.0"));
-    assert!(is_valid_version("v1.0-beta"));
-    assert!(is_valid_version("v1.0.0-alpha.1"));
-    assert!(is_valid_version("*")); // Wildcard
-    
-    // Invalid versions
-    assert!(!is_valid_version(""));
-    assert!(!is_valid_version("invalid@version"));
-    assert!(!is_valid_version("invalid.version.with.too.many.dots"));
-    assert!(!is_valid_version("invalid version")); // Space
-}
-
-// =================================
-// TrnStats Tests  
-// =================================
-
-#[test]
-fn test_trn_stats_analyze() {
-    let trns = vec![
-        Trn::parse("trn:user:alice:tool:openapi:github-api:v1.0").unwrap(),
-        Trn::parse("trn:user:bob:tool:python:data-processor:v2.0").unwrap(),
-        Trn::parse("trn:org:company:model:bert:language-model:v1.0").unwrap(),
-        Trn::parse("trn:aiplatform:model:gpt:text-generator:latest").unwrap(),
-    ];
-    
-    let stats = TrnStats::analyze(&trns);
-    
-    assert_eq!(stats.total_count, 4);
-    assert_eq!(stats.platform_distribution.len(), 3); // user, org, aiplatform
-    assert_eq!(stats.resource_type_distribution.len(), 2); // tool, model
-    assert!(stats.platform_distribution.contains_key(&Platform::User));
-    assert!(stats.platform_distribution.contains_key(&Platform::Org));
-    assert!(stats.platform_distribution.contains_key(&Platform::AiPlatform));
-    assert_eq!(stats.platform_distribution[&Platform::User], 2);
-    assert_eq!(stats.platform_distribution[&Platform::Org], 1);
-    assert_eq!(stats.platform_distribution[&Platform::AiPlatform], 1);
-}
-
-#[test]
-fn test_trn_stats_empty() {
-    let trns: Vec<Trn> = vec![];
-    let stats = TrnStats::analyze(&trns);
-    
-    assert_eq!(stats.total_count, 0);
-    assert_eq!(stats.platform_distribution.len(), 0);
-    assert_eq!(stats.resource_type_distribution.len(), 0);
-}
-
-#[test]
-fn test_trn_stats_single() {
-    let trns = vec![
-        Trn::parse("trn:user:alice:tool:openapi:github-api:v1.0").unwrap(),
-    ];
-    
-    let stats = TrnStats::analyze(&trns);
-    
-    assert_eq!(stats.total_count, 1);
-    assert_eq!(stats.platform_distribution.len(), 1);
-    assert_eq!(stats.platform_distribution[&Platform::User], 1);
-    assert_eq!(stats.resource_type_distribution[&ResourceType::Tool], 1);
-}
-
-// =================================
-// Normalization Tests
-// =================================
-
-#[test]
-fn test_normalize_trn() {
-    // Test basic normalization
-    let normalized = normalize_trn("trn:aiplatform:model:bert:base-model:v1.0");
-    assert_eq!(normalized, "trn:aiplatform:model:bert:base-model:v1.0");
-    
-    // Test normalization with scope
-    let normalized_scope = normalize_trn("trn:user:alice:tool:openapi:github-api:v1.0");
-    assert_eq!(normalized_scope, "trn:user:alice:tool:openapi:github-api:v1.0");
-    
-    // Test normalization with hash
-    let normalized_hash = normalize_trn("trn:user:alice:tool:openapi:github-api:v1.0@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
-    assert_eq!(normalized_hash, "trn:user:alice:tool:openapi:github-api:v1.0@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
-}
-
-// =================================
-// Validation Rules Tests
-// =================================
-
-#[test]
-fn test_platform_validation_rules() {
-    // User platform requires scope
-    assert!(is_valid_trn("trn:user:alice:tool:openapi:github-api:v1.0"));
-    assert!(!is_valid_trn("trn:user:tool:openapi:github-api:v1.0")); // Missing scope
-    
-    // Org platform requires scope  
-    assert!(is_valid_trn("trn:org:company:model:bert:language-model:v1.0"));
-    assert!(!is_valid_trn("trn:org:model:bert:language-model:v1.0")); // Missing scope
-    
-    // Aiplatform doesn't require scope
-    assert!(is_valid_trn("trn:aiplatform:model:bert:base-model:v1.0"));
-}
-
-#[test]
-fn test_resource_type_validation() {
-    // Valid resource types with proper format
-    assert!(is_valid_trn("trn:aiplatform:tool:openapi:apigateway:v1.0"));
-    assert!(is_valid_trn("trn:aiplatform:model:bert:basemodel:v1.0"));
-    assert!(is_valid_trn("trn:org:company:dataset:csv:salesdata:v1.0"));
-    assert!(is_valid_trn("trn:aiplatform:pipeline:etl:dataprocessor:v1.0"));
-    assert!(is_valid_trn("trn:aiplatform:tool:openapi:chatbot:v1.0"));
-}
-
-#[test]
-fn test_version_validation_rules() {
-    // Valid versions
-    assert!(is_valid_trn("trn:aiplatform:model:bert:base-model:v1.0"));
-    assert!(is_valid_trn("trn:aiplatform:model:bert:base-model:latest"));
-    assert!(is_valid_trn("trn:aiplatform:model:bert:base-model:1.0.0"));
-    assert!(is_valid_trn("trn:aiplatform:model:bert:base-model:v2.1.0-beta"));
-    
-    // Invalid versions (empty version)
-    assert!(!is_valid_trn("trn:aiplatform:model:bert:base-model:"));
-}
-
-// =================================
-// Error Handling Tests
-// =================================
 
 #[test]
 fn test_validation_error_messages() {
-    let validator = TrnValidator::new();
+    let test_cases = vec![
+        ("", "empty string"),
+        ("not_a_trn", "wrong format"),
+        ("trn:user", "too few components"),
+        ("prefix:user:alice:tool:myapi:v1.0", "wrong prefix"),
+    ];
     
-    // Test specific error for invalid TRN
-    let result = validator.validate("trn:user:tool:openapi:githubapi:v1.0");
-    assert!(result.is_err());
-    let error_msg = result.unwrap_err().to_string();
-    assert!(!error_msg.is_empty()); // Just verify we get some error message
-    
-    // Test error for invalid format
-    let result2 = validator.validate("invalid-trn");
-    assert!(result2.is_err());
-    let error_msg2 = result2.unwrap_err().to_string();
-    assert!(error_msg2.contains("format") || error_msg2.contains("invalid"));
+    for (invalid_trn, expected_reason) in test_cases {
+        let result = validate_trn_string(invalid_trn);
+        assert!(result.is_err(), "Should be invalid: {}", invalid_trn);
+        
+        let error_msg = result.unwrap_err().to_string().to_lowercase();
+        match expected_reason {
+            "empty string" => assert!(error_msg.contains("empty") || error_msg.contains("invalid")),
+            "too few components" => assert!(error_msg.contains("component") || error_msg.contains("format") || error_msg.contains("expected")),
+            "empty platform" => assert!(error_msg.contains("empty") || error_msg.contains("platform")),
+            "wrong prefix" => assert!(error_msg.contains("trn") || error_msg.contains("format") || error_msg.contains("expected")),
+            "wrong format" => assert!(error_msg.contains("format") || error_msg.contains("expected")),
+            _ => {}
+        }
+    }
 }
 
-// =================================
-// Performance Tests
-// =================================
-
 #[test]
-fn test_validation_performance_batch() {
-    // Create a large batch of TRNs for performance testing
+fn test_validation_performance() {
+    use std::time::Instant;
+    
     let trns: Vec<String> = (0..1000)
-        .map(|i| format!("trn:aiplatform:model:bert:model-{}:v1.0", i))
+        .map(|i| format!("trn:user:user{}:tool:api{}:v1.0", i, i))
         .collect();
     
-    let report = batch_validate(&trns);
+    let start = Instant::now();
+    let report = generate_validation_report(&trns);
+    let duration = start.elapsed();
     
     assert_eq!(report.total, 1000);
-    assert_eq!(report.valid, 1000); // All should be valid
+    assert_eq!(report.valid, 1000);
     assert_eq!(report.invalid, 0);
-    assert_eq!(report.success_count, report.total);
-}
-
-#[test]
-fn test_validation_caching() {
-    let validator = TrnValidator::new();
-    let trn = "trn:user:alice:tool:openapi:github-api:v1.0";
     
-    // First validation (should cache)
-    let result1 = validator.is_valid(trn);
-    
-    // Second validation (should use cache)
-    let result2 = validator.is_valid(trn);
-    
-    assert_eq!(result1, result2); // Results should be the same
-    // Just verify the cache is working by checking we get consistent results
-}
-
-// =================================
-// Configuration Tests
-// =================================
-
-// #[test]
-// fn test_validation_config() {
-//     let config = ValidationConfig::new();
-//     let validator = TrnValidator::with_config(config);
-    
-//     // Test that config is accessible
-//     let retrieved_config = validator.config();
-//     assert!(retrieved_config.strict_validation); // Should have default strict validation
-// }
-
-// =================================
-// Edge Cases
-// =================================
-
-#[test]
-fn test_validation_edge_cases() {
-    // Shorter TRN (within limits)
-    let long_trn = format!("trn:org:{}:tool:openapi:{}:v1.0", 
-                          "a".repeat(30), "b".repeat(30));
-    assert!(is_valid_trn(&long_trn));
-    
-    // TRN with special characters in allowed positions (use org platform for dashes)
-    assert!(is_valid_trn("trn:org:user-123:tool:openapi:api-v2:v1.0"));
-    assert!(is_valid_trn("trn:user:username:tool:openapi:apiv2:v1.0"));
-}
-
-#[test]
-fn test_validation_consistent_results() {
-    let trn = "trn:user:alice:tool:openapi:github-api:v1.0";
-    
-    // Multiple validations should give consistent results
-    for _ in 0..10 {
-        assert!(is_valid_trn(trn));
-        assert!(validate(trn).is_ok());
-    }
+    // Should validate 1000 TRNs in less than 1 second
+    assert!(duration.as_millis() < 1000, "Validation too slow: {:?}", duration);
 } 

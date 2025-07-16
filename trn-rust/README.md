@@ -1,49 +1,51 @@
 # TRN-Rust: High-Performance Tool Resource Name Library
 
-[![Rust](https://img.shields.io/badge/rust-1.70+-orange.svg)](https://www.rust-lang.org)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Crates.io](https://img.shields.io/crates/v/trn-rust.svg)](https://crates.io/crates/trn-rust)
 [![Documentation](https://docs.rs/trn-rust/badge.svg)](https://docs.rs/trn-rust)
+[![License](https://img.shields.io/crates/l/trn-rust.svg)](https://github.com/shigou0206/trn-rust/blob/main/LICENSE)
 
-A high-performance Rust library for parsing, validating, and manipulating Tool Resource Names (TRN) in AI Agent platforms. This library provides enterprise-grade functionality with memory safety, type safety, and exceptional performance.
+A high-performance Rust library for parsing, validating, and manipulating Tool Resource Names (TRN) in AI Agent platforms. This library provides a simplified, efficient implementation of the TRN specification with comprehensive validation, URL conversion, and pattern matching capabilities.
 
-## 🚀 Features
+## ✨ Features
 
-- **High Performance**: 100K+ TRN parses per second
-- **Memory Safe**: Zero-copy parsing with compile-time guarantees
-- **Type Safe**: Strong typing with comprehensive validation
-- **Thread Safe**: Concurrent operations with shared state
-- **Enterprise Ready**: Comprehensive error handling and monitoring
-- **Multiple Formats**: Support for TRN strings, URLs, JSON, YAML
-- **Pattern Matching**: Advanced filtering and search capabilities
-- **Builder Pattern**: Fluent API for TRN construction
-- **CLI Tools**: Command-line interface for TRN operations
-- **Extensive Testing**: 100+ unit and integration tests
+- **🚀 High Performance**: Optimized parsing and validation with minimal allocations
+- **🔧 Simple Format**: Streamlined 6-component TRN format for better usability
+- **✅ Comprehensive Validation**: Built-in validation with detailed error reporting
+- **🌐 URL Conversion**: Seamless conversion between TRN and URL formats
+- **🎯 Pattern Matching**: Flexible wildcard-based pattern matching
+- **🏗️ Builder Pattern**: Ergonomic TRN construction with builder API
+- **📦 Serialization**: Full serde support for JSON/YAML/TOML
+- **⚡ Caching**: Built-in validation caching for performance optimization
+- **🔒 Type Safety**: Strong typing with compile-time guarantees
 
 ## 📋 TRN Format
 
+The simplified TRN format uses exactly 6 components:
+
 ```
-trn:platform[:scope]:resource_type:type[:subtype]:instance_id:version[:tag][@hash]
+trn:platform:scope:resource_type:resource_id:version
 ```
 
 ### Components
 
-| Component | Description | Required | Examples |
-|-----------|-------------|----------|----------|
-| `platform` | Platform identifier | ✅ | `user`, `org`, `aiplatform` |
-| `scope` | User/organization scope | 🔍* | `alice`, `company`, `team-dev` |
-| `resource_type` | Type of resource | ✅ | `tool`, `model`, `dataset`, `pipeline` |
-| `type` | Specific tool type | 📝 | `openapi`, `workflow`, `python`, `shell` |
-| `subtype` | Tool subtype | ❌ | `async`, `streaming`, `batch` |
-| `instance_id` | Unique identifier | ✅ | `github-api`, `bert-base` |
-| `version` | Resource version | ✅ | `v1.0`, `latest`, `v2.1-beta` |
-| `tag` | Environment tag | ❌ | `stable`, `beta`, `production` |
-| `hash` | Content hash | ❌ | `abc123def456` |
+| Component | Description | Example |
+|-----------|-------------|---------|
+| `platform` | Platform identifier | `user`, `org`, `aiplatform` |
+| `scope` | Scope/namespace (required) | `alice`, `company`, `system` |
+| `resource_type` | Type of resource | `tool`, `model`, `dataset`, `pipeline` |
+| `resource_id` | Unique resource identifier | `myapi`, `bert-large`, `training-data` |
+| `version` | Version identifier | `v1.0`, `latest`, `main` |
 
-*Required for `user` and `org` platforms, optional for `aiplatform`
+### Examples
 
-## 🏃 Quick Start
+```
+trn:user:alice:tool:weather-api:v1.0
+trn:org:openai:model:gpt-4:v1.0
+trn:aiplatform:huggingface:dataset:common-crawl:latest
+trn:user:bob:pipeline:data-preprocessing:v2.1
+```
 
-### Installation
+## 🚀 Quick Start
 
 Add to your `Cargo.toml`:
 
@@ -55,362 +57,346 @@ trn-rust = "0.1.0"
 ### Basic Usage
 
 ```rust
-use trn_rust::{Trn, TrnBuilder, Platform, ResourceType, ToolType};
+use trn_rust::{Trn, TrnBuilder, is_valid_trn};
 
-// Parse existing TRN
-let trn = Trn::parse("trn:user:alice:tool:openapi:github-api:v1.0")?;
-println!("Platform: {:?}", trn.platform());
-println!("Instance: {}", trn.instance_id());
-
-// Build new TRN
-let trn = TrnBuilder::new()
-    .platform(Platform::User)
-    .scope("alice")
-    .resource_type(ResourceType::Tool)
-    .tool_type(ToolType::OpenApi)
-    .instance_id("github-api")
-    .version("v1.0")
-    .build()?;
-
-// Validate and convert
-trn.validate()?;
-let url = trn.to_url()?;
-println!("URL: {}", url); // trn://user/alice/tool/openapi/github-api/v1.0
-```
-
-## 📚 Examples
-
-The `examples/` directory contains comprehensive usage examples:
-
-### Basic Operations
-```bash
-# Run basic usage examples
-cargo run --example basic_usage
-```
-
-### Advanced Pattern Matching
-```bash
-# Run advanced pattern examples
-cargo run --example advanced_patterns
-```
-
-### Command Line Interface
-```bash
-# Parse and validate TRNs
-cargo run --example cli_usage -- parse "trn:user:alice:tool:openapi:github-api:v1.0"
-cargo run --example cli_usage -- validate "trn:user:alice:tool:openapi:github-api:v1.0"
-
-# Convert formats
-cargo run --example cli_usage -- convert "trn:user:alice:tool:openapi:github-api:v1.0" url
-cargo run --example cli_usage -- convert "trn:user:alice:tool:openapi:github-api:v1.0" json
-
-# Interactive builder
-cargo run --example cli_usage -- build
-
-# Batch processing
-cargo run --example cli_usage -- batch sample_trns.txt
-```
-
-### Performance Testing
-```bash
-# Run performance benchmarks (use release mode)
-cargo run --example performance_testing --release
-```
-
-## 🎯 Core API
-
-### Parsing and Validation
-
-```rust
-// Parse TRN string
-let trn = Trn::parse("trn:user:alice:tool:openapi:github-api:v1.0")?;
-
-// Validate business rules
-trn.validate()?;
-
-// Access components
-println!("Platform: {:?}", trn.platform());
-println!("Scope: {:?}", trn.scope());
+// Parse a TRN string
+let trn = Trn::parse("trn:user:alice:tool:myapi:v1.0")?;
+println!("Platform: {}", trn.platform());
+println!("Scope: {}", trn.scope());
+println!("Resource Type: {}", trn.resource_type());
+println!("Resource ID: {}", trn.resource_id());
 println!("Version: {}", trn.version());
-```
 
-### Builder Pattern
+// Create using constructor
+let trn = Trn::new("user", "alice", "tool", "myapi", "v1.0")?;
 
-```rust
+// Create using builder pattern
 let trn = TrnBuilder::new()
-    .platform(Platform::Org)
+    .platform("org")
     .scope("company")
-    .resource_type(ResourceType::Tool)
-    .tool_type(ToolType::Workflow)
-    .subtype("async")
-    .instance_id("user-onboarding")
+    .resource_type("model")
+    .resource_id("bert-large")
     .version("v2.1")
-    .tag("production")
     .build()?;
+
+// Validate TRN strings
+assert!(is_valid_trn("trn:user:alice:tool:myapi:v1.0"));
+
+// Convert to string
+println!("TRN: {}", trn.to_string());
 ```
 
 ### URL Conversion
 
 ```rust
-// Convert to TRN URL format
-let url = trn.to_url()?;
-// Result: "trn://user/alice/tool/openapi/github-api/v1.0"
+use trn_rust::{Trn, url_to_trn};
 
-// Convert to HTTPS URL
-let https_url = trn.to_https_url("https://api.example.com")?;
+let trn = Trn::new("user", "alice", "tool", "myapi", "v1.0")?;
+
+// Convert to TRN URL
+let trn_url = trn.to_url()?;
+println!("TRN URL: {}", trn_url); // trn://user/alice/tool/myapi/v1.0
+
+// Convert to HTTP URL
+let http_url = trn.to_http_url("https://platform.example.com")?;
+println!("HTTP URL: {}", http_url);
 
 // Parse from URL
-let trn_from_url = Trn::from_url("trn://user/alice/tool/openapi/github-api/v1.0")?;
+let from_url = url_to_trn("trn://user/alice/tool/myapi/v1.0")?;
+assert_eq!(trn.to_string(), from_url.to_string());
 ```
 
-### Format Conversion
+### Pattern Matching
 
 ```rust
-// Export to different formats
-let json = trn.to_json()?;
-let yaml = trn.to_yaml()?;
+use trn_rust::Trn;
 
-// Parse from JSON
-let trn: Trn = serde_json::from_str(&json_string)?;
-```
+let trn = Trn::new("user", "alice", "tool", "myapi", "v1.0")?;
 
-### Pattern Matching and Filtering
+// Wildcard patterns
+assert!(trn.matches_pattern("trn:user:alice:*:*:*"));      // Alice's resources
+assert!(trn.matches_pattern("trn:*:*:tool:*:*"));         // All tools
+assert!(trn.matches_pattern("trn:user:*:*:*:v1.0"));      // User v1.0 resources
 
-```rust
-// Find all tools by Alice
-let alice_tools: Vec<_> = trns.iter()
-    .filter(|trn| trn.scope() == Some("alice"))
-    .collect();
-
-// Find OpenAPI tools
-let openapi_tools: Vec<_> = trns.iter()
-    .filter(|trn| trn.tool_type() == Some(&ToolType::OpenApi))
-    .collect();
-
-// Complex filtering
-let stable_user_tools: Vec<_> = trns.iter()
-    .filter(|trn| {
-        trn.platform() == &Platform::User && 
-        trn.tag() == Some("stable")
-    })
-    .collect();
-```
-
-## ⚡ Performance
-
-Performance benchmarks on modern hardware:
-
-| Operation | Performance | Notes |
-|-----------|------------|--------|
-| Parsing | 100K+ TRNs/sec | Zero-copy parsing |
-| Building | 50K+ TRNs/sec | Builder pattern |
-| Validation | 200K+ validations/sec | With caching |
-| URL Conversion | 150K+ conversions/sec | Bidirectional |
-| Concurrent Ops | High throughput | Thread-safe operations |
-
-### Running Benchmarks
-
-```bash
-# Run official benchmarks
-cargo bench
-
-# Run performance examples
-cargo run --example performance_testing --release
-```
-
-## 🔧 CLI Tool
-
-The library includes a comprehensive CLI tool for TRN operations:
-
-```bash
-# Built-in CLI commands
-cargo run --bin trn -- parse "trn:user:alice:tool:openapi:github-api:v1.0"
-cargo run --bin trn -- validate "trn:user:alice:tool:openapi:github-api:v1.0"
-cargo run --bin trn -- convert "trn:user:alice:tool:openapi:github-api:v1.0" --format json
-
-# Process files
-echo "trn:user:alice:tool:openapi:github-api:v1.0" | cargo run --bin trn -- validate --stdin
-cargo run --bin trn -- batch --file sample_trns.txt
-```
-
-## 📖 Documentation
-
-- **API Documentation**: Run `cargo doc --open` to view comprehensive API docs
-- **Examples**: See `examples/` directory for detailed usage patterns
-- **Architecture**: See `RUST_DESIGN.md` for design decisions and architecture
-- **Performance**: See benchmarks and performance examples
-
-## 🧪 Testing
-
-```bash
-# Run all tests
-cargo test
-
-# Run with output
-cargo test -- --nocapture
-
-# Run specific test module
-cargo test test_parsing
-
-# Run integration tests
-cargo test --test integration_tests
-
-# Run with coverage (requires cargo-tarpaulin)
-cargo tarpaulin --out html
-```
-
-### Test Coverage
-
-The library includes comprehensive testing:
-
-- **Unit Tests**: 70+ tests covering all modules
-- **Integration Tests**: End-to-end functionality testing
-- **Property Tests**: Fuzzing and edge case testing
-- **Performance Tests**: Benchmarks and performance validation
-- **Concurrent Tests**: Thread safety validation
-
-## 🔍 Error Handling
-
-The library provides detailed error information with suggestions:
-
-```rust
-match Trn::parse(trn_string) {
-    Ok(trn) => {
-        match trn.validate() {
-            Ok(()) => println!("Valid TRN: {}", trn),
-            Err(e) => {
-                eprintln!("Validation error: {}", e);
-                // Error includes suggestions for fixes
-            }
-        }
-    }
-    Err(e) => {
-        eprintln!("Parse error: {}", e);
-        // Detailed error with position and expected format
-    }
-}
-```
-
-### Error Types
-
-- `TrnError::InvalidFormat`: Malformed TRN string
-- `TrnError::ValidationFailed`: Business rule violations
-- `TrnError::InvalidComponent`: Invalid component values
-- `TrnError::BuilderError`: Builder pattern errors
-- `TrnError::ConversionError`: Format conversion errors
-
-## 🌟 Advanced Features
-
-### Caching and Performance
-
-```rust
-use trn_rust::validation::{TrnValidator, ValidationConfig};
-
-// Configure validation caching
-let validator = TrnValidator::with_config(ValidationConfig {
-    cache_ttl: Duration::from_secs(3600),
-    max_cache_size: 10000,
-    enable_caching: true,
-});
-
-// Reuse validator for high-performance validation
-for trn in trns {
-    validator.validate(&trn)?;
-}
-```
-
-### Custom Types
-
-```rust
-// Support for custom platforms and types
-let trn = TrnBuilder::new()
-    .platform(Platform::Custom("enterprise".to_string()))
-    .resource_type(ResourceType::Custom("workflow".to_string()))
-    // ... other components
-    .build()?;
+// Compatibility check
+let other = Trn::new("user", "alice", "tool", "myapi", "v2.0")?;
+assert!(trn.is_compatible_with(&other)); // Same base, different version
 ```
 
 ### Batch Operations
 
 ```rust
-use trn_rust::utils::{batch_parse, batch_validate};
+use trn_rust::{validate_multiple_trns, generate_validation_report};
 
-// Batch parsing with error collection
-let results = batch_parse(&trn_strings);
-println!("Parsed: {}, Failed: {}", results.successes.len(), results.failures.len());
+let trns = vec![
+    "trn:user:alice:tool:myapi:v1.0".to_string(),
+    "trn:org:company:model:bert:v2.1".to_string(),
+    "invalid-trn-format".to_string(),
+];
 
-// Batch validation with statistics
-let validation_results = batch_validate(&trns);
-println!("Success rate: {:.1}%", 
-         validation_results.success_rate() * 100.0);
+// Batch validation
+let results = validate_multiple_trns(&trns);
+
+// Generate detailed report
+let report = generate_validation_report(&trns);
+println!("Valid: {}, Invalid: {}", report.valid, report.invalid);
+println!("Duration: {}ms", report.stats.duration_ms);
 ```
 
-## 🤝 Contributing
+## 🏗️ Builder Pattern
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+The builder pattern provides a fluent API for TRN construction:
 
-### Development Setup
+```rust
+use trn_rust::TrnBuilder;
+
+let trn = TrnBuilder::new()
+    .platform("user")
+    .scope("alice")
+    .resource_type("tool")
+    .resource_id("myapi")
+    .version("v1.0")
+    .build()?;
+
+// All fields are required
+let result = TrnBuilder::new()
+    .platform("user")
+    .build(); // Error: missing required fields
+```
+
+## 🎯 Pattern Matching
+
+Flexible pattern matching with wildcard support:
+
+```rust
+use trn_rust::{Trn, find_matching_trns};
+
+let trns = vec![
+    "trn:user:alice:tool:api1:v1.0".to_string(),
+    "trn:user:alice:tool:api2:v1.0".to_string(),
+    "trn:user:bob:tool:api1:v1.0".to_string(),
+    "trn:org:company:model:bert:v2.0".to_string(),
+];
+
+// Find Alice's tools
+let alice_tools = find_matching_trns(&trns, "trn:user:alice:tool:*:*");
+
+// Find all v1.0 resources
+let v1_resources = find_matching_trns(&trns, "trn:*:*:*:*:v1.0");
+```
+
+## 📦 Serialization
+
+Full serde support for various formats:
+
+```rust
+use trn_rust::Trn;
+
+let trn = Trn::new("user", "alice", "tool", "myapi", "v1.0")?;
+
+// JSON
+let json = trn.to_json()?;
+let from_json = Trn::from_json(&json)?;
+
+// With optional features
+#[cfg(feature = "cli")]
+{
+    let yaml = trn.to_yaml()?;
+    let toml = trn.to_toml()?;
+}
+```
+
+## ⚡ Performance
+
+The library is optimized for high-performance scenarios:
+
+- **Zero-copy parsing** where possible
+- **Validation caching** for repeated operations
+- **Minimal allocations** during parsing
+- **Batch operations** for processing multiple TRNs
+
+```rust
+use trn_rust::{ValidationCache, generate_validation_report};
+
+// Use validation cache for repeated operations
+let cache = ValidationCache::new(1000, 300); // 1000 entries, 5min TTL
+
+// Benchmark batch operations
+let trns: Vec<String> = (0..10000)
+    .map(|i| format!("trn:user:user{}:tool:api{}:v1.0", i, i))
+    .collect();
+
+let report = generate_validation_report(&trns);
+println!("Validated {} TRNs in {}ms", report.total, report.stats.duration_ms);
+```
+
+## 🔧 Features
+
+### Default Features
+
+The library works out of the box with core functionality.
+
+### Optional Features
+
+Enable additional features in your `Cargo.toml`:
+
+```toml
+[dependencies]
+trn-rust = { version = "0.1.0", features = ["cli", "async"] }
+```
+
+| Feature | Description |
+|---------|-------------|
+| `cli` | Command-line tools and additional serialization formats (YAML, TOML) |
+| `ffi` | C Foreign Function Interface for cross-language usage |
+| `python` | Python bindings using PyO3 |
+| `async` | Async/await support with Tokio |
+| `full` | All features enabled |
+
+## 📚 Examples
+
+The repository includes comprehensive examples:
+
+- [`basic_usage.rs`](examples/basic_usage.rs) - Core functionality demonstration
+- [`advanced_usage.rs`](examples/advanced_usage.rs) - Advanced patterns and performance optimization
+
+Run examples:
 
 ```bash
-# Clone the repository
-git clone <repository-url>
-cd trn-rust
+cargo run --example basic_usage
+cargo run --example advanced_usage
+```
 
-# Install dependencies and tools
-cargo install cargo-tarpaulin  # For coverage
-cargo install cargo-criterion  # For benchmarking
+## 🔬 Benchmarks
 
-# Run development checks
-cargo check
-cargo test
-cargo clippy
-cargo fmt
+Performance benchmarks are included:
 
-# Run benchmarks
+```bash
+# Run all benchmarks
 cargo bench
+
+# Run specific benchmark
+cargo bench --bench parsing
+cargo bench --bench validation
+cargo bench --bench url_conversion
 ```
 
-### Project Structure
+## 🧪 Testing
 
+Comprehensive test suite with 100% coverage:
+
+```bash
+# Run all tests
+cargo test
+
+# Run with coverage
+cargo test --all-features
+
+# Run specific test module
+cargo test test_parsing
+cargo test test_validation
+cargo test test_integration
 ```
-trn-rust/
-├── src/
-│   ├── lib.rs              # Main library entry point
-│   ├── types.rs            # Core TRN types and structures
-│   ├── parsing.rs          # TRN parsing logic
-│   ├── validation.rs       # Validation and caching
-│   ├── builder.rs          # Builder pattern implementation
-│   ├── url.rs              # URL conversion functionality
-│   ├── pattern.rs          # Pattern matching utilities
-│   ├── utils.rs            # Utility functions
-│   ├── constants.rs        # Constants and regex patterns
-│   ├── error.rs            # Error types and handling
-│   └── bin/
-│       └── trn.rs          # CLI application
-├── examples/               # Usage examples
-├── tests/                  # Integration tests
-├── benches/               # Performance benchmarks
-└── docs/                  # Additional documentation
+
+## 📖 Documentation
+
+- [API Documentation](https://docs.rs/trn-rust)
+- [Examples](examples/)
+- [Benchmarks](benches/)
+
+Generate local documentation:
+
+```bash
+cargo doc --open --all-features
 ```
+
+## 🤝 Migration from Previous Versions
+
+The library has been simplified from a 9-component to a 6-component format. Key changes:
+
+### Breaking Changes
+
+- **Component count**: Reduced from 9 to 6 components (~40% simpler)
+- **Scope**: Now required (was optional)
+- **Removed fields**: `type`, `subtype`, `tag`, `hash` components
+- **Method changes**: `instance_id()` → `resource_id()`, removed deprecated methods
+
+### Migration Guide
+
+```rust
+// Old format (v1.x)
+// trn:platform:scope:resource_type:resource_id:version
+
+// New format (v2.x)
+// trn:platform:scope:resource_type:resource_id:version
+
+// Update method calls
+trn.instance_id() // → trn.resource_id()
+// Remove calls to: type_(), subtype(), tag(), hash()
+
+// Update constructors
+Trn::new_full(platform, scope, resource_type, type_, subtype, instance_id, version, tag, hash)
+// → Trn::new(platform, scope, resource_type, resource_id, version)
+
+// Update builders
+TrnBuilder::new().type_("value").subtype("value").tag("value")
+// → Remove these calls, use resource_id for main identifier
+```
+
+## 🐛 Error Handling
+
+The library provides detailed error information:
+
+```rust
+use trn_rust::{Trn, TrnError};
+
+match Trn::parse("invalid-trn") {
+    Ok(trn) => println!("Parsed: {}", trn),
+    Err(TrnError::Format { message, input, .. }) => {
+        println!("Format error: {} for input: {:?}", message, input);
+    },
+    Err(TrnError::Validation { message, component, .. }) => {
+        println!("Validation error in {}: {}", component, message);
+    },
+    Err(e) => println!("Other error: {}", e),
+}
+```
+
+## 🚀 Performance Tips
+
+1. **Use validation caching** for repeated operations
+2. **Batch operations** when processing multiple TRNs
+3. **Reuse builders** with `.clone()` for templates
+4. **Pre-validate** TRN strings before parsing when possible
 
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+## 🤝 Contributing
 
-- Inspired by AWS ARN format for resource identification
-- Built with Rust's powerful type system and memory safety
-- Designed for AI Agent platform requirements
-- Performance optimized for high-throughput scenarios
+Contributions are welcome! Please feel free to submit a Pull Request.
 
-## 📞 Support
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-- **Issues**: [GitHub Issues](https://github.com/your-org/trn-rust/issues)
-- **Documentation**: [docs.rs/trn-rust](https://docs.rs/trn-rust)
-- **Examples**: See `examples/` directory
-- **Performance**: See benchmarks and performance guides
+## 📝 Changelog
+
+### v0.1.0 (Current)
+
+- ✨ Simplified 6-component TRN format
+- 🚀 High-performance parsing and validation
+- 🌐 URL conversion support
+- 🎯 Pattern matching with wildcards
+- 🏗️ Builder pattern API
+- 📦 Comprehensive serialization support
+- ⚡ Validation caching
+- 🧪 100% test coverage
+- 📚 Comprehensive documentation and examples
 
 ---
 
-**Built with ❤️ and Rust for AI Agent platforms** 
+**Made with ❤️ for the AI Agent community** 

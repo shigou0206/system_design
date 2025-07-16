@@ -30,12 +30,8 @@ struct PatternComponents {
     platform: Option<String>,
     scope: Option<String>,
     resource_type: Option<String>,
-    type_: Option<String>,
-    subtype: Option<String>,
-    instance_id: Option<String>,
+    resource_id: Option<String>,
     version: Option<String>,
-    tag: Option<String>,
-    hash: Option<String>,
 }
 
 impl TrnMatcher {
@@ -164,18 +160,11 @@ fn parse_pattern_components(pattern: &str) -> TrnResult<PatternComponents> {
         ));
     }
     
-    // Split by colons, handling hash separator
-    let (main_part, hash_part) = if let Some(hash_pos) = pattern.find('@') {
-        (&pattern[..hash_pos], Some(&pattern[hash_pos + 1..]))
-    } else {
-        (pattern, None)
-    };
+    let parts: Vec<&str> = pattern.split(':').collect();
     
-    let parts: Vec<&str> = main_part.split(':').collect();
-    
-    if parts.len() < 6 {
+    if parts.len() != 6 {
         return Err(TrnError::pattern(
-            "Pattern must have at least 6 components",
+            "Pattern must have exactly 6 components (trn:platform:scope:resource_type:resource_id:version)",
             pattern,
         ));
     }
@@ -189,87 +178,15 @@ fn parse_pattern_components(pattern: &str) -> TrnResult<PatternComponents> {
         }
     };
     
-    let mut components = PatternComponents {
+    let components = PatternComponents {
         platform: to_pattern(parts[1]),
-        scope: None,
-        resource_type: None,
-        type_: None,
-        subtype: None,
-        instance_id: None,
-        version: None,
-        tag: None,
-        hash: hash_part.and_then(|h| to_pattern(h)),
+        scope: to_pattern(parts[2]),
+        resource_type: to_pattern(parts[3]),
+        resource_id: to_pattern(parts[4]),
+        version: to_pattern(parts[5]),
     };
     
-    // Parse based on number of components
-    match parts.len() {
-        6 => {
-            // trn:platform:resource_type:type:instance_id:version
-            components.resource_type = to_pattern(parts[2]);
-            components.type_ = to_pattern(parts[3]);
-            components.instance_id = to_pattern(parts[4]);
-            components.version = to_pattern(parts[5]);
-        }
-        7 => {
-            // Could be with scope or subtype - use heuristics
-            if is_scope_pattern(parts[2], parts[1]) {
-                // trn:platform:scope:resource_type:type:instance_id:version
-                components.scope = to_pattern(parts[2]);
-                components.resource_type = to_pattern(parts[3]);
-                components.type_ = to_pattern(parts[4]);
-                components.instance_id = to_pattern(parts[5]);
-                components.version = to_pattern(parts[6]);
-            } else {
-                // trn:platform:resource_type:type:subtype:instance_id:version
-                components.resource_type = to_pattern(parts[2]);
-                components.type_ = to_pattern(parts[3]);
-                components.subtype = to_pattern(parts[4]);
-                components.instance_id = to_pattern(parts[5]);
-                components.version = to_pattern(parts[6]);
-            }
-        }
-        8 => {
-            // trn:platform:scope:resource_type:type:subtype:instance_id:version
-            components.scope = to_pattern(parts[2]);
-            components.resource_type = to_pattern(parts[3]);
-            components.type_ = to_pattern(parts[4]);
-            components.subtype = to_pattern(parts[5]);
-            components.instance_id = to_pattern(parts[6]);
-            components.version = to_pattern(parts[7]);
-        }
-        9 => {
-            // trn:platform:scope:resource_type:type:subtype:instance_id:version:tag
-            components.scope = to_pattern(parts[2]);
-            components.resource_type = to_pattern(parts[3]);
-            components.type_ = to_pattern(parts[4]);
-            components.subtype = to_pattern(parts[5]);
-            components.instance_id = to_pattern(parts[6]);
-            components.version = to_pattern(parts[7]);
-            components.tag = to_pattern(parts[8]);
-        }
-        _ => {
-            return Err(TrnError::pattern(
-                "Pattern has too many components",
-                pattern,
-            ));
-        }
-    }
-    
     Ok(components)
-}
-
-/// Check if a component looks like a scope pattern
-fn is_scope_pattern(component: &str, platform: &str) -> bool {
-    if component == "*" {
-        return true;
-    }
-    
-    match platform {
-        "user" | "org" => true,
-        "aiplatform" => false,
-        "*" => component.len() <= 32,
-        _ => component.len() <= 32,
-    }
 }
 
 /// Build regex pattern from components
@@ -283,15 +200,12 @@ fn build_regex_pattern(components: &PatternComponents) -> TrnResult<String> {
         pattern.push_str(PLATFORM_PATTERN);
     }
     
-    // Scope (optional)
+    // Scope (required in 6-component format)
+    pattern.push(':');
     if let Some(scope) = &components.scope {
-        pattern.push(':');
         pattern.push_str(&escape_pattern_component(scope));
     } else {
-        pattern.push_str("(?:");
-        pattern.push(':');
         pattern.push_str(SCOPE_PATTERN);
-        pattern.push_str(")?");
     }
     
     // Resource type
@@ -302,31 +216,12 @@ fn build_regex_pattern(components: &PatternComponents) -> TrnResult<String> {
         pattern.push_str(RESOURCE_TYPE_PATTERN);
     }
     
-    // Type
+    // Resource ID
     pattern.push(':');
-    if let Some(type_) = &components.type_ {
-        pattern.push_str(&escape_pattern_component(type_));
+    if let Some(resource_id) = &components.resource_id {
+        pattern.push_str(&escape_pattern_component(resource_id));
     } else {
-        pattern.push_str(TYPE_PATTERN);
-    }
-    
-    // Subtype (optional)
-    if let Some(subtype) = &components.subtype {
-        pattern.push(':');
-        pattern.push_str(&escape_pattern_component(subtype));
-    } else {
-        pattern.push_str("(?:");
-        pattern.push(':');
-        pattern.push_str(SUBTYPE_PATTERN);
-        pattern.push_str(")?");
-    }
-    
-    // Instance ID
-    pattern.push(':');
-    if let Some(instance_id) = &components.instance_id {
-        pattern.push_str(&escape_pattern_component(instance_id));
-    } else {
-        pattern.push_str(INSTANCE_ID_PATTERN);
+        pattern.push_str(RESOURCE_ID_PATTERN);
     }
     
     // Version
@@ -335,28 +230,6 @@ fn build_regex_pattern(components: &PatternComponents) -> TrnResult<String> {
         pattern.push_str(&escape_pattern_component(version));
     } else {
         pattern.push_str(VERSION_PATTERN);
-    }
-    
-    // Tag (optional)
-    if let Some(tag) = &components.tag {
-        pattern.push(':');
-        pattern.push_str(&escape_pattern_component(tag));
-    } else {
-        pattern.push_str("(?:");
-        pattern.push(':');
-        pattern.push_str(TAG_PATTERN);
-        pattern.push_str(")?");
-    }
-    
-    // Hash (optional)
-    if let Some(hash) = &components.hash {
-        pattern.push('@');
-        pattern.push_str(&escape_pattern_component(hash));
-    } else {
-        pattern.push_str("(?:");
-        pattern.push('@');
-        pattern.push_str(HASH_PATTERN);
-        pattern.push_str(")?");
     }
     
     pattern.push('$');
@@ -401,10 +274,6 @@ pub enum MatchCondition {
     ResourceType(Vec<String>),
     /// Version range
     VersionRange { min: Option<String>, max: Option<String> },
-    /// Has tag
-    HasTag,
-    /// Has hash
-    HasHash,
     /// Custom function
     Custom(fn(&str) -> bool),
 }
@@ -456,8 +325,7 @@ impl AdvancedMatcher {
                     
                     matches
                 }
-                MatchCondition::HasTag => trn_obj.tag().is_some(),
-                MatchCondition::HasHash => trn_obj.hash().is_some(),
+
                 MatchCondition::Custom(func) => func(trn),
             }
         })
@@ -554,40 +422,40 @@ pub struct PatternTemplates;
 impl PatternTemplates {
     /// All user tools
     pub fn user_tools() -> &'static str {
-        "trn:user:*:tool:*:*:*"
+        "trn:user:*:tool:*:*"
     }
     
     /// All organization tools
     pub fn org_tools() -> &'static str {
-        "trn:org:*:tool:*:*:*"
+        "trn:org:*:tool:*:*"
     }
     
     /// All system tools
     pub fn system_tools() -> &'static str {
-        "trn:aiplatform:tool:*:*:*"
+        "trn:aiplatform:*:tool:*:*"
     }
     
     /// All OpenAPI tools
     pub fn openapi_tools() -> &'static str {
-        "trn:*:tool:openapi:*:*"
+        "trn:*:*:tool:openapi:*"
     }
     
     /// All Python tools
     pub fn python_tools() -> &'static str {
-        "trn:*:tool:python:*:*"
+        "trn:*:*:tool:python:*"
     }
     
     /// All datasets
     pub fn datasets() -> &'static str {
-        "trn:*:dataset:*:*:*"
+        "trn:*:*:dataset:*:*"
     }
     
     /// All models
     pub fn models() -> &'static str {
-        "trn:*:model:*:*:*"
+        "trn:*:*:model:*:*"
     }
     
-    /// Latest versions only
+    /// Latest versions
     pub fn latest_versions() -> &'static str {
         "trn:*:*:*:*:latest"
     }
@@ -597,9 +465,9 @@ impl PatternTemplates {
         "trn:*:*:*:*:stable"
     }
     
-    /// Tools with hashes
+    /// Tools with hashes (note: not supported in 6-component format)
     pub fn tools_with_hash() -> &'static str {
-        "trn:*:tool:*:*:*@*"
+        "trn:*:*:tool:*:*"
     }
 }
 
@@ -610,46 +478,46 @@ mod tests {
     #[test]
     fn test_simple_pattern_matching() {
         assert!(matches_pattern(
-            "trn:user:alice:tool:openapi:github-api:v1.0",
-            "trn:user:alice:tool:openapi:*:*"
+            "trn:user:alice:tool:myapi:v1.0",
+            "trn:user:alice:tool:*:*"
         ));
         
         assert!(matches_pattern(
-            "trn:user:alice:tool:openapi:github-api:v1.0",
-            "trn:user:*:tool:*:*:*"
+            "trn:user:alice:tool:myapi:v1.0",
+            "trn:user:*:tool:*:*"
         ));
         
         assert!(!matches_pattern(
-            "trn:user:alice:tool:openapi:github-api:v1.0",
-            "trn:org:*:tool:*:*:*"
+            "trn:user:alice:tool:myapi:v1.0",
+            "trn:org:*:tool:*:*"
         ));
     }
 
     #[test]
     fn test_find_matching_trns() {
         let trns = vec![
-            "trn:user:alice:tool:openapi:github-api:v1.0".to_string(),
-            "trn:user:alice:tool:python:script:v2.0".to_string(),
-            "trn:user:bob:tool:openapi:slack-api:v1.5".to_string(),
-            "trn:org:company:tool:workflow:pipeline:latest".to_string(),
+            "trn:user:alice:tool:myapi:v1.0".to_string(),
+            "trn:user:alice:tool:python-script:v2.0".to_string(),
+            "trn:user:bob:tool:slack-api:v1.5".to_string(),
+            "trn:org:company:tool:workflow-pipeline:latest".to_string(),
         ];
 
-        let alice_tools = find_matching_trns(&trns, "trn:user:alice:tool:*:*:*");
+        let alice_tools = find_matching_trns(&trns, "trn:user:alice:tool:*:*");
         assert_eq!(alice_tools.len(), 2);
 
-        let openapi_tools = find_matching_trns(&trns, "trn:*:*:tool:openapi:*:*");
-        assert_eq!(openapi_tools.len(), 2);
+        let all_tools = find_matching_trns(&trns, "trn:*:*:tool:*:*");
+        assert_eq!(all_tools.len(), 4);
     }
 
     #[test]
     fn test_trn_matcher() {
         let mut matcher = TrnMatcher::empty();
-        matcher.add_pattern("trn:user:*:tool:*:*:*").unwrap();
-        matcher.add_pattern("trn:org:*:tool:*:*:*").unwrap();
+        matcher.add_pattern("trn:user:*:tool:*:*").unwrap();
+        matcher.add_pattern("trn:org:*:tool:*:*").unwrap();
 
-        assert!(matcher.matches("trn:user:alice:tool:openapi:api:v1.0"));
-        assert!(matcher.matches("trn:org:company:tool:workflow:pipeline:latest"));
-        assert!(!matcher.matches("trn:aiplatform:tool:system:backup:v1.0"));
+        assert!(matcher.matches("trn:user:alice:tool:myapi:v1.0"));
+        assert!(matcher.matches("trn:org:company:tool:workflow:latest"));
+        assert!(!matcher.matches("trn:aiplatform:system:dataset:training:v1.0"));
 
         assert_eq!(matcher.pattern_count(), 2);
     }
@@ -658,11 +526,10 @@ mod tests {
     fn test_advanced_matcher() {
         let matcher = AdvancedMatcher::new()
             .add_condition(MatchCondition::Platform(vec!["user".to_string()]))
-            .add_condition(MatchCondition::ResourceType(vec!["tool".to_string()]))
-            .add_condition(MatchCondition::HasHash);
+            .add_condition(MatchCondition::ResourceType(vec!["tool".to_string()]));
 
-        assert!(!matcher.matches("trn:user:alice:tool:openapi:api:v1.0"));
-        assert!(matcher.matches("trn:user:alice:tool:openapi:api:v1.0@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"));
+        assert!(matcher.matches("trn:user:alice:tool:myapi:v1.0"));
+        assert!(!matcher.matches("trn:system:alice:tool:myapi:v1.0"));
     }
 
     #[test]
@@ -675,26 +542,24 @@ mod tests {
 
     #[test]
     fn test_pattern_templates() {
-        let trn = "trn:user:alice:tool:openapi:github-api:v1.0";
+        let trn = "trn:user:alice:tool:myapi:v1.0";
         
         assert!(matches_pattern(trn, PatternTemplates::user_tools()));
-        assert!(matches_pattern(trn, PatternTemplates::openapi_tools()));
         assert!(!matches_pattern(trn, PatternTemplates::python_tools()));
     }
 
     #[test]
     fn test_pattern_with_hash() {
-        let trn = "trn:user:alice:tool:openapi:api:v1.0@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
-        assert!(matches_pattern(trn, "trn:*:*:*:*:*:*@*"));
-        assert!(matches_pattern(trn, "trn:user:alice:tool:*:*:*@sha256:*"));
+        let trn = "trn:user:alice:tool:myapi:v1.0";
+        assert!(matches_pattern(trn, "trn:*:*:tool:*:*"));
     }
 
     #[test]
     fn test_pattern_analysis() {
         let patterns = vec![
-            "trn:user:*:tool:*:*:*".to_string(),
-            "trn:user:alice:tool:openapi:*:*".to_string(),
-            "trn:org:*:tool:*:*:*".to_string(),
+            "trn:user:*:tool:*:*".to_string(),
+            "trn:user:alice:tool:openapi:*".to_string(),
+            "trn:org:*:tool:*:*".to_string(),
         ];
 
         let stats = analyze_patterns(&patterns);
@@ -714,8 +579,8 @@ pub fn validate_pattern(pattern: &str) -> TrnResult<()> {
     }
     
     let parts: Vec<&str> = pattern.split(':').collect();
-    if parts.len() < 7 {
-        return Err(TrnError::format("Pattern must have at least 7 components", Some(pattern.to_string())));
+    if parts.len() != 6 {
+        return Err(TrnError::format("Pattern must have exactly 6 components", Some(pattern.to_string())));
     }
     
     // Validate platform
@@ -797,17 +662,7 @@ impl TrnFilter {
         }
         
         if let Some(ref scope) = self.scope {
-            if let Some(trn_scope) = trn.scope() {
-                if trn_scope != scope {
-                    return false;
-                }
-            } else {
-                return false;
-            }
-        }
-        
-        if let Some(ref tool_type) = self.tool_type {
-            if trn.type_() != tool_type {
+            if trn.scope() != scope {
                 return false;
             }
         }

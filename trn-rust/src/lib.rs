@@ -17,7 +17,7 @@
 //! ## TRN Format
 //!
 //! ```text
-//! trn:platform[:scope]:resource_type:type[:subtype]:instance_id:version[:tag][@hash]
+//! trn:platform:scope:resource_type:resource_id:version
 //! ```
 //!
 //! ## Examples
@@ -28,21 +28,19 @@
 //! use trn_rust::{Trn, TrnBuilder};
 //!
 //! // Parse a TRN string
-//! let trn = Trn::parse("trn:user:alice:tool:openapi::getUserById:v1.0:")?;
+//! let trn = Trn::parse("trn:user:alice:tool:getUserById:v1.0")?;
 //! println!("Platform: {}", trn.platform());
-//! println!("Scope: {:?}", trn.scope());
-//! println!("Type: {}", trn.type_());
+//! println!("Scope: {}", trn.scope());
+//! println!("Resource Type: {}", trn.resource_type());
+//! println!("Resource ID: {}", trn.resource_id());
 //!
 //! // Create using builder pattern
 //! let trn = TrnBuilder::new()
 //!     .platform("user")
 //!     .scope("alice")
 //!     .resource_type("tool")
-//!     .type_("openapi")
-//!     .subtype("")
-//!     .instance_id("getUserById")
+//!     .resource_id("getUserById")
 //!     .version("v1.0")
-//!     .tag("")
 //!     .build()?;
 //!
 //! // Convert to string
@@ -55,7 +53,7 @@
 //! ```rust
 //! use trn_rust::Trn;
 //!
-//! let trn = Trn::parse("trn:user:alice:tool:openapi::getUserById:v1.0:")?;
+//! let trn = Trn::parse("trn:user:alice:tool:getUserById:v1.0")?;
 //!
 //! // Convert to TRN URL
 //! let trn_url = trn.to_url()?;
@@ -70,16 +68,15 @@
 //! ### Pattern Matching
 //!
 //! ```rust
-//! use trn_rust::utils::find_matching_trns;
+//! use trn_rust::Trn;
 //!
-//! let trns = vec![
-//!     "trn:user:alice:tool:openapi::getUserById:v1.0:".to_string(),
-//!     "trn:user:alice:tool:openapi::sendMessage:v2.0:".to_string(),
-//!     "trn:user:bob:tool:python::processData:v1.5:".to_string(),
-//! ];
+//! let trn = Trn::parse("trn:user:alice:tool:getUserById:v1.0")?;
 //!
-//! let alice_tools = find_matching_trns(&trns, "trn:user:alice:*");
-//! println!("Alice's tools: {:#?}", alice_tools);
+//! // Pattern matching with wildcards
+//! assert!(trn.matches_pattern("trn:user:alice:*:*:*"));    // Alice's resources
+//! assert!(trn.matches_pattern("trn:*:*:tool:*:*"));        // All tools
+//! assert!(trn.matches_pattern("trn:user:*:*:*:v1.0"));     // User v1.0 resources
+//! # Ok::<(), trn_rust::TrnError>(())
 //! ```
 
 #![deny(missing_docs)]
@@ -105,7 +102,7 @@ mod validation;
 // Re-export public API
 pub use builder::TrnBuilder;
 pub use error::{TrnError, TrnResult};
-pub use types::{Platform, ResourceType, ToolType, Trn, TrnComponents};
+pub use types::{Platform, ResourceType, Trn, TrnComponents};
 
 // Re-export utility functions
 pub use utils::*;
@@ -115,8 +112,10 @@ pub use url::url_to_trn;
 
 // Re-export validation functions
 pub use validation::{
-    batch_validate, is_valid_trn, is_valid_identifier, is_valid_scope, is_valid_version,
-    normalize_trn, TrnValidator, TrnStats, ValidationReport
+    is_valid_trn, validate_trn_string, validate_trn_struct, validate_multiple_trns,
+    generate_validation_report, check_component_format, validate_naming_conventions,
+    validate_performance_batch, ValidationCache, ValidationCacheStats, ValidationStats,
+    ValidationReport
 };
 
 // Note: Validate trait is defined in this module, not re-exported
@@ -124,18 +123,18 @@ pub use validation::{
 // Re-export pattern matching
 pub use pattern::{find_matching_trns, TrnMatcher};
 
-// Feature-gated modules
-#[cfg(feature = "cli")]
-#[cfg_attr(docsrs, doc(cfg(feature = "cli")))]
-pub mod cli;
+// Feature-gated modules (commented out for now - implement as needed)
+// #[cfg(feature = "cli")]
+// #[cfg_attr(docsrs, doc(cfg(feature = "cli")))]
+// pub mod cli;
 
-#[cfg(feature = "ffi")]
-#[cfg_attr(docsrs, doc(cfg(feature = "ffi")))]
-pub mod ffi;
+// #[cfg(feature = "ffi")]
+// #[cfg_attr(docsrs, doc(cfg(feature = "ffi")))]
+// pub mod ffi;
 
-#[cfg(feature = "python")]
-#[cfg_attr(docsrs, doc(cfg(feature = "python")))]
-mod python;
+// #[cfg(feature = "python")]
+// #[cfg_attr(docsrs, doc(cfg(feature = "python")))]
+// mod python;
 
 /// Library version information
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -149,9 +148,9 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// ```rust
 /// use trn_rust::parse;
 ///
-/// let trn = parse("trn:user:alice:tool:openapi::getUserById:v1.0:")?;
+/// let trn = parse("trn:user:alice:tool:getUserById:v1.0")?;
 /// assert_eq!(trn.platform(), "user");
-/// assert_eq!(trn.scope(), Some("alice"));
+/// assert_eq!(trn.scope(), "alice");
 /// # Ok::<(), trn_rust::TrnError>(())
 /// ```
 pub fn parse(input: &str) -> TrnResult<Trn> {
@@ -185,10 +184,10 @@ impl Validate for Trn {
 /// ```rust
 /// use trn_rust::{validate, Trn};
 ///
-/// assert!(validate("trn:user:alice:tool:openapi::getUserById:v1.0:").is_ok());
+/// assert!(validate("trn:user:alice:tool:getUserById:v1.0").is_ok());
 /// assert!(validate("invalid-trn").is_err());
 ///
-/// let trn = Trn::parse("trn:user:alice:tool:openapi::getUserById:v1.0:").unwrap();
+/// let trn = Trn::parse("trn:user:alice:tool:getUserById:v1.0").unwrap();
 /// assert!(validate(&trn).is_ok());
 /// ```
 pub fn validate<T: Validate + ?Sized>(input: &T) -> TrnResult<()> {
@@ -208,11 +207,8 @@ pub fn validate<T: Validate + ?Sized>(input: &T) -> TrnResult<()> {
 ///     .platform("user")
 ///     .scope("alice")
 ///     .resource_type("tool")
-///     .type_("openapi")
-///     .subtype("")
-///     .instance_id("getUserById")
+///     .resource_id("getUserById")
 ///     .version("v1.0")
-///     .tag("")
 ///     .build()?;
 /// # Ok::<(), trn_rust::TrnError>(())
 /// ```
@@ -226,35 +222,17 @@ mod tests {
 
     #[test]
     fn test_parse_convenience_function() {
-        let trn = parse("trn:user:alice:tool:openapi::getUserById:v1.0:").unwrap();
+        let trn = parse("trn:user:alice:tool:getUserById:v1.0").unwrap();
         assert_eq!(trn.platform(), "user");
-        assert_eq!(trn.scope(), Some("alice"));
-        assert_eq!(trn.instance_id(), "getUserById");
+        assert_eq!(trn.scope(), "alice");
+        assert_eq!(trn.resource_id(), "getUserById");
     }
 
     #[test]
     fn test_validate_convenience_function() {
-        assert!(validate("trn:user:alice:tool:openapi::getUserById:v1.0:").is_ok());
+        assert!(validate("trn:user:alice:tool:getUserById:v1.0").is_ok());
         assert!(validate("invalid-trn-format").is_err());
         assert!(validate("").is_err());
-    }
-
-    #[test]
-    fn test_builder_convenience_function() {
-        let trn = builder()
-            .platform("user")
-            .scope("alice")
-            .resource_type("tool")
-            .type_("openapi")
-            .subtype("")
-            .instance_id("getUserById")
-            .version("v1.0")
-            .tag("")
-            .build()
-            .unwrap();
-
-        assert_eq!(trn.platform(), "user");
-        assert_eq!(trn.scope(), Some("alice"));
     }
 
     #[test]

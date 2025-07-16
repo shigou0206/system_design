@@ -9,20 +9,16 @@ The TRN Rust library provides high-performance parsing, validation, and manipula
 ## TRN Format
 
 ```
-trn:platform[:scope]:resource_type:type[:subtype]:instance_id:version[:tag][@hash]
+trn:platform:scope:resource_type:resource_id:version
 ```
 
 ### Components
 
 - **platform**: `user`, `org`, or `aiplatform`
-- **scope**: User/organization identifier (optional for aiplatform)
-- **resource_type**: `tool`, `model`, `dataset`, `pipeline`
-- **type**: Tool type like `openapi`, `workflow`, `python`, `shell`, `system`, `async_api`
-- **subtype**: Optional tool subtype
-- **instance_id**: Unique identifier for the resource
+- **scope**: User/organization identifier (required for all platforms)
+- **resource_type**: `tool`, `model`, `dataset`, `pipeline`, etc.
+- **resource_id**: Unique identifier for the resource
 - **version**: Version string (semantic versioning recommended)
-- **tag**: Optional tag like `stable`, `beta`, `latest`
-- **hash**: Optional content hash
 
 ## Examples
 
@@ -45,10 +41,10 @@ cargo run --example basic_usage
 
 **Sample TRNs used:**
 ```
-trn:user:alice:tool:openapi:github-api:v1.0
-trn:org:company:tool:workflow:user-onboarding:v2.1
-trn:aiplatform::model::bert-base:latest
-trn:user:bob:tool:python:data-processor:v1.5:stable
+trn:user:alice:tool:github-api:v1.0
+trn:org:company:tool:user-onboarding:v2.1
+trn:aiplatform:system:model:bert-base:latest
+trn:user:bob:tool:data-processor:v1.5
 ```
 
 ### 2. Advanced Patterns (`advanced_patterns.rs`)
@@ -85,13 +81,13 @@ Demonstrates command-line application patterns:
 cargo run --example cli_usage
 
 # Parse a TRN
-cargo run --example cli_usage -- parse "trn:user:alice:tool:openapi:github-api:v1.0"
+cargo run --example cli_usage -- parse "trn:user:alice:tool:github-api:v1.0"
 
 # Validate a TRN
-cargo run --example cli_usage -- validate "trn:user:alice:tool:openapi:github-api:v1.0"
+cargo run --example cli_usage -- validate "trn:user:alice:tool:github-api:v1.0"
 
 # Convert to URL
-cargo run --example cli_usage -- convert "trn:user:alice:tool:openapi:github-api:v1.0" url
+cargo run --example cli_usage -- convert "trn:user:alice:tool:github-api:v1.0" url
 
 # Interactive builder
 cargo run --example cli_usage -- build
@@ -170,15 +166,15 @@ cargo run --example performance_testing --release
 cargo run --example cli_usage
 
 # Parse and display TRN components
-cargo run --example cli_usage -- parse "trn:user:alice:tool:openapi:github-api:v1.0"
+cargo run --example cli_usage -- parse "trn:user:alice:tool:github-api:v1.0"
 
 # Validate TRN format and business rules
-cargo run --example cli_usage -- validate "trn:user:alice:tool:openapi:github-api:v1.0"
+cargo run --example cli_usage -- validate "trn:user:alice:tool:github-api:v1.0"
 
 # Convert TRN to different formats
-cargo run --example cli_usage -- convert "trn:user:alice:tool:openapi:github-api:v1.0" json
-cargo run --example cli_usage -- convert "trn:user:alice:tool:openapi:github-api:v1.0" url
-cargo run --example cli_usage -- convert "trn:user:alice:tool:openapi:github-api:v1.0" yaml
+cargo run --example cli_usage -- convert "trn:user:alice:tool:github-api:v1.0" json
+cargo run --example cli_usage -- convert "trn:user:alice:tool:github-api:v1.0" url
+cargo run --example cli_usage -- convert "trn:user:alice:tool:github-api:v1.0" yaml
 ```
 
 ### Creating Sample Data
@@ -187,17 +183,17 @@ Create a file `sample_trns.txt` with TRNs for batch processing:
 
 ```
 # User tools
-trn:user:alice:tool:openapi:github-api:v1.0:stable
-trn:user:bob:tool:workflow:user-flow:v2.0:beta
-trn:user:charlie:tool:python:data-processor:v1.5:stable
+trn:user:alice:tool:github-api:v1.0
+trn:user:bob:tool:user-flow:v2.0
+trn:user:charlie:tool:data-processor:v1.5
 
 # Organization tools
-trn:org:company:tool:workflow:hr-system:v3.0:production
-trn:org:startup:tool:openapi:customer-api:v2.5:stable
+trn:org:company:tool:hr-system:v3.0
+trn:org:startup:tool:customer-api:v2.5
 
 # AI Platform models
-trn:aiplatform::model::bert-base:latest
-trn:aiplatform::dataset::training-data:v1.0
+trn:aiplatform:system:model:bert-base:latest
+trn:aiplatform:system:dataset:training-data:v1.0
 ```
 
 Then process it:
@@ -212,10 +208,10 @@ cargo run --example cli_usage -- analyze sample_trns.txt
 ### Library Usage
 
 ```rust
-use trn_rust::{Trn, TrnBuilder, Platform, ResourceType, ToolType};
+use trn_rust::{Trn, TrnBuilder};
 
 // Parse existing TRN
-let trn = Trn::parse("trn:user:alice:tool:openapi:github-api:v1.0")?;
+let trn = Trn::parse("trn:user:alice:tool:github-api:v1.0")?;
 
 // Build new TRN
 let trn = TrnBuilder::new()
