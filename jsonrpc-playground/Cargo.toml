@@ -1,0 +1,49 @@
+[package]
+name = "jsonrpc-playground"
+version = "0.1.0"
+edition = "2021"
+description = "Interactive Web Playground for JsonRPC-Rust Framework"
+authors = ["System Design Team"]
+
+[dependencies]
+# JsonRPC框架
+jsonrpc-rust = { path = "../jsonrpc-rust" }
+
+# Web服务器
+axum = { version = "0.7", features = ["ws", "macros"] }
+tokio = { version = "1.0", features = ["full"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["fs", "cors", "trace"] }
+
+# 序列化
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# 错误处理
+anyhow = "1.0"
+thiserror = "1.0"
+
+# 日志
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# UUID生成
+uuid = { version = "1.0", features = ["v4"] }
+
+# 异步支持
+futures = "0.3"
+
+# 时间处理
+chrono = { version = "0.4", features = ["serde"] }
+
+# 全局静态变量
+lazy_static = "1.4"
+
+# 随机数生成
+fastrand = "2.0"
+
+# 流处理
+tokio-stream = { version = "0.1", features = ["sync"] }
+
+[dev-dependencies]
+tokio-test = "0.4" 

@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JsonRPC Playground</title>
+    <style>
+        body {
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            margin: 0;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            color: #569cd6;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .section {
+            background: #252526;
+            border: 1px solid #3e3e42;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .section h3 {
+            color: #4ec9b0;
+            margin-top: 0;
+        }
+        
+        .request-panel, .response-panel {
+            display: flex;
+            gap: 20px;
+        }
+        
+        .panel {
+            flex: 1;
+        }
+        
+        textarea {
+            width: 100%;
+            height: 200px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            border: 1px solid #3e3e42;
+            border-radius: 4px;
+            padding: 10px;
+            font-family: inherit;
+            font-size: 14px;
+            resize: vertical;
+        }
+        
+        button {
+            background: #0e639c;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px;
+        }
+        
+        button:hover {
+            background: #1177bb;
+        }
+        
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        
+        .method-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        
+        .status.success {
+            background: #0f3b0f;
+            color: #4ec9b0;
+            border: 1px solid #4ec9b0;
+        }
+        
+        .status.error {
+            background: #3b0f0f;
+            color: #f48771;
+            border: 1px solid #f48771;
+        }
+        
+        .status.info {
+            background: #0f1b3b;
+            color: #569cd6;
+            border: 1px solid #569cd6;
+        }
+        
+        .websocket-section {
+            border-left: 4px solid #4ec9b0;
+        }
+        
+        #wsMessages {
+            height: 150px;
+            overflow-y: auto;
+            background: #1e1e1e;
+            border: 1px solid #3e3e42;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        
+        .ws-message {
+            margin: 5px 0;
+            padding: 5px;
+            border-radius: 3px;
+        }
+        
+        .ws-message.sent {
+            background: #1e3a1e;
+            border-left: 3px solid #4ec9b0;
+        }
+        
+        .ws-message.received {
+            background: #1e1e3a;
+            border-left: 3px solid #569cd6;
+        }
+        
+        .ws-message .timestamp {
+            color: #808080;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🦀 JsonRPC Playground</h1>
+        <p style="text-align: center; color: #808080;">Interactive testing platform for JsonRPC-Rust framework</p>
+        
+        <!-- HTTP JsonRPC Section -->
+        <div class="section">
+            <h3>HTTP JsonRPC</h3>
+            
+            <div class="method-buttons">
+                <button onclick="setMethod('system.info')">System Info</button>
+                <button onclick="setMethod('system.stats')">Stats</button>
+                <button onclick="setMethod('math.add', '[1, 2, 3, 4, 5]')">Math Add</button>
+                <button onclick="setMethod('math.multiply', '{&quot;a&quot;: 6, &quot;b&quot;: 7}')">Math Multiply</button>
+                <button onclick="setMethod('math.fibonacci', '{&quot;n&quot;: 10}')">Fibonacci</button>
+                <button onclick="setMethod('tools.echo', '{&quot;message&quot;: &quot;Hello World!&quot;}')">Echo</button>
+                <button onclick="setMethod('tools.timestamp')">Timestamp</button>
+                <button onclick="setMethod('tools.uuid')">UUID</button>
+            </div>
+            
+            <div class="request-panel">
+                <div class="panel">
+                    <h4>Request</h4>
+                    <textarea id="jsonRequest" placeholder="JsonRPC request...">
+{
+  "jsonrpc": "2.0",
+  "method": "system.info",
+  "id": 1
+}</textarea>
+                    <br>
+                    <button onclick="sendRequest()">Send Request</button>
+                    <button onclick="clearRequest()">Clear</button>
+                </div>
+                
+                <div class="panel">
+                    <h4>Response</h4>
+                    <textarea id="jsonResponse" readonly placeholder="Response will appear here..."></textarea>
+                    <div id="httpStatus"></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Server-Sent Events Section -->
+        <div class="section" style="border-left: 4px solid #f48771;">
+            <h3>📡 Server-Sent Events (SSE)</h3>
+            <p style="color: #808080; margin: 0 0 15px 0;">Real-time data streaming using SSE protocol</p>
+            
+            <div class="method-buttons">
+                <button onclick="connectSSE('stats', 3000)" id="sseStats">System Stats Stream</button>
+                <button onclick="connectSSE('data', 1000)" id="sseData">Data Stream (1s)</button>
+                <button onclick="connectSSE('logs')" id="sseLogs">Log Stream</button>
+                <button onclick="connectSSE('metrics', 2000)" id="sseMetrics">Metrics Stream (2s)</button>
+                <button onclick="disconnectAllSSE()" id="sseDisconnect">Disconnect All</button>
+            </div>
+            
+            <div id="sseStatus" class="status info">SSE: Disconnected</div>
+            
+            <div style="display: flex; gap: 20px;">
+                <div style="flex: 2;">
+                    <h4>Real-time SSE Data</h4>
+                    <div id="sseMessages" style="height: 250px; overflow-y: auto; background: #1e1e1e; border: 1px solid #3e3e42; padding: 10px; margin: 10px 0; border-radius: 4px; font-family: 'Courier New', monospace;"></div>
+                    <button onclick="clearSSEMessages()">Clear SSE Data</button>
+                </div>
+                
+                <div style="flex: 1;">
+                    <h4>Active Connections</h4>
+                    <div id="sseConnections" style="height: 250px; overflow-y: auto; background: #1e1e1e; border: 1px solid #3e3e42; padding: 10px; margin: 10px 0; border-radius: 4px;">
+                        <div style="color: #808080; text-align: center; margin-top: 100px;">No active SSE connections</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Events System Section -->
+        <div class="section" style="border-left: 4px solid #ffcc00;">
+            <h3>📊 Events System</h3>
+            <p style="color: #808080; margin: 0 0 15px 0;">Backend event monitoring and analytics</p>
+            
+            <div class="method-buttons">
+                <button onclick="refreshEventStats()">Refresh Stats</button>
+                <button onclick="loadRecentEvents()">Load Recent Events</button>
+                <button onclick="connectSSE('events')" id="sseEvents">Live Events Stream</button>
+                <button onclick="clearEventHistory()">Clear History</button>
+            </div>
+            
+            <div style="display: flex; gap: 20px; margin-top: 15px;">
+                <div style="flex: 1;">
+                    <h4>Event Statistics</h4>
+                    <div id="eventStats" style="height: 200px; overflow-y: auto; background: #1e1e1e; border: 1px solid #3e3e42; padding: 10px; margin: 10px 0; border-radius: 4px;"></div>
+                </div>
+                
+                <div style="flex: 2;">
+                    <h4>Recent Events</h4>
+                    <div id="eventHistory" style="height: 200px; overflow-y: auto; background: #1e1e1e; border: 1px solid #3e3e42; padding: 10px; margin: 10px 0; border-radius: 4px; font-family: 'Courier New', monospace;"></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- WebSocket Section -->
+        <div class="section websocket-section">
+            <h3>WebSocket JsonRPC</h3>
+            
+            <div class="method-buttons">
+                <button onclick="connectWebSocket()" id="wsConnect">Connect</button>
+                <button onclick="disconnectWebSocket()" id="wsDisconnect" disabled>Disconnect</button>
+                <button onclick="sendWsMessage('system.ping', '{}')">Ping</button>
+                <button onclick="sendWsMessage('connection.info', '{}')">Connection Info</button>
+                <button onclick="sendWsMessage('stream.data', '{&quot;type&quot;: &quot;start&quot;, &quot;interval_ms&quot;: 1000}')">Start Data Stream</button>
+                <button onclick="sendWsMessage('stream.data', '{&quot;type&quot;: &quot;stop&quot;}')">Stop Stream</button>
+                <button onclick="sendWsMessage('stream.chat', '{&quot;action&quot;: &quot;join&quot;, &quot;room&quot;: &quot;general&quot;}')">Join Chat</button>
+            </div>
+            
+            <div id="wsStatus" class="status info">WebSocket: Disconnected</div>
+            
+            <div style="display: flex; gap: 20px;">
+                <div style="flex: 1;">
+                    <h4>Send Message</h4>
+                    <textarea id="wsRequest" placeholder="WebSocket JsonRPC message...">
+{
+  "jsonrpc": "2.0",
+  "method": "system.ping",
+  "id": "ping-1"
+}</textarea>
+                    <br>
+                    <button onclick="sendWsRequest()" id="wsSend" disabled>Send</button>
+                    <button onclick="clearWsRequest()">Clear</button>
+                </div>
+                
+                <div style="flex: 1;">
+                    <h4>Messages</h4>
+                    <div id="wsMessages"></div>
+                    <button onclick="clearWsMessages()">Clear Messages</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Documentation -->
+        <div class="section">
+            <h3>Available Methods</h3>
+            <h4>HTTP & WebSocket Methods:</h4>
+            <ul>
+                <li><strong>system.info</strong> - Get system information</li>
+                <li><strong>system.stats</strong> - Get request statistics</li>
+                <li><strong>system.sessions</strong> - List active sessions</li>
+                <li><strong>math.add</strong> - Add numbers (params: array of numbers)</li>
+                <li><strong>math.multiply</strong> - Multiply two numbers (params: {a, b})</li>
+                <li><strong>math.fibonacci</strong> - Calculate Fibonacci sequence (params: {n})</li>
+                <li><strong>tools.echo</strong> - Echo input (params: any)</li>
+                <li><strong>tools.timestamp</strong> - Get current timestamp</li>
+                <li><strong>tools.uuid</strong> - Generate UUID</li>
+            </ul>
+            <h4>WebSocket-only Methods:</h4>
+            <ul>
+                <li><strong>stream.data</strong> - Control data streams (params: {type: "start|stop", interval_ms})</li>
+                <li><strong>stream.chat</strong> - Chat operations (params: {action: "join|leave|message", room, message})</li>
+                <li><strong>connection.info</strong> - Get connection info</li>
+                <li><strong>connection.list</strong> - List all connections</li>
+                <li><strong>system.ping</strong> - Ping server</li>
+            </ul>
+            <h4>Server-Sent Events (SSE) Streams:</h4>
+            <ul>
+                <li><strong>stats</strong> - Real-time system statistics (/api/sse?stream_type=stats)</li>
+                <li><strong>events</strong> - JsonRPC request/response events (/api/sse?stream_type=events)</li>
+                <li><strong>data</strong> - Generated data stream with random values (/api/sse?stream_type=data)</li>
+                <li><strong>logs</strong> - System log entries (/api/sse?stream_type=logs)</li>
+                <li><strong>metrics</strong> - Performance metrics (/api/sse?stream_type=metrics)</li>
+            </ul>
+            <h4>Events API:</h4>
+            <ul>
+                <li><strong>/api/events/recent</strong> - Get recent events (GET)</li>
+                <li><strong>/api/events/stats</strong> - Get event statistics (GET)</li>
+                <li><strong>/api/events/info</strong> - Get events system info (GET)</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let requestId = 1;
+        
+        // HTTP JsonRPC functions
+        function setMethod(method, params = null) {
+            const request = {
+                "jsonrpc": "2.0",
+                "method": method,
+                "id": requestId++
+            };
+            
+            if (params) {
+                try {
+                    request.params = JSON.parse(params);
+                } catch (e) {
+                    request.params = params;
+                }
+            }
+            
+            document.getElementById('jsonRequest').value = JSON.stringify(request, null, 2);
+        }
+        
+        async function sendRequest() {
+            const requestText = document.getElementById('jsonRequest').value;
+            const statusDiv = document.getElementById('httpStatus');
+            
+            try {
+                const request = JSON.parse(requestText);
+                statusDiv.innerHTML = '<div class="status info">Sending request...</div>';
+                
+                const response = await fetch('/api/jsonrpc', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: requestText
+                });
+                
+                const responseData = await response.json();
+                document.getElementById('jsonResponse').value = JSON.stringify(responseData, null, 2);
+                
+                if (response.ok) {
+                    statusDiv.innerHTML = `<div class="status success">Success (${response.status})</div>`;
+                } else {
+                    statusDiv.innerHTML = `<div class="status error">Error (${response.status})</div>`;
+                }
+                
+            } catch (error) {
+                document.getElementById('jsonResponse').value = `Error: ${error.message}`;
+                statusDiv.innerHTML = `<div class="status error">Request failed: ${error.message}</div>`;
+            }
+        }
+        
+        function clearRequest() {
+            document.getElementById('jsonRequest').value = '';
+            document.getElementById('jsonResponse').value = '';
+            document.getElementById('httpStatus').innerHTML = '';
+        }
+        
+        // WebSocket functions
+        function connectWebSocket() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                return;
+            }
+            
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = function() {
+                updateWsStatus('Connected', 'success');
+                document.getElementById('wsConnect').disabled = true;
+                document.getElementById('wsDisconnect').disabled = false;
+                document.getElementById('wsSend').disabled = false;
+            };
+            
+            ws.onmessage = function(event) {
+                addWsMessage('received', event.data);
+            };
+            
+            ws.onclose = function() {
+                updateWsStatus('Disconnected', 'info');
+                document.getElementById('wsConnect').disabled = false;
+                document.getElementById('wsDisconnect').disabled = true;
+                document.getElementById('wsSend').disabled = true;
+            };
+            
+            ws.onerror = function(error) {
+                updateWsStatus('Error: ' + error, 'error');
+            };
+        }
+        
+        function disconnectWebSocket() {
+            if (ws) {
+                ws.close();
+            }
+        }
+        
+        function sendWsRequest() {
+            const message = document.getElementById('wsRequest').value;
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(message);
+                addWsMessage('sent', message);
+            }
+        }
+        
+        function sendWsMessage(method, params) {
+            const message = {
+                "jsonrpc": "2.0",
+                "method": method,
+                "id": `ws-${requestId++}`
+            };
+            
+            if (params && params !== '{}') {
+                try {
+                    message.params = JSON.parse(params);
+                } catch (e) {
+                    message.params = params;
+                }
+            }
+            
+            document.getElementById('wsRequest').value = JSON.stringify(message, null, 2);
+            sendWsRequest();
+        }
+        
+        function clearWsRequest() {
+            document.getElementById('wsRequest').value = '';
+        }
+        
+        function updateWsStatus(status, type) {
+            const statusDiv = document.getElementById('wsStatus');
+            statusDiv.className = `status ${type}`;
+            statusDiv.textContent = `WebSocket: ${status}`;
+        }
+        
+        function addWsMessage(type, data) {
+            const messagesDiv = document.getElementById('wsMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `ws-message ${type}`;
+            
+            const timestamp = new Date().toLocaleTimeString();
+            messageDiv.innerHTML = `
+                <div class="timestamp">${timestamp} - ${type.toUpperCase()}</div>
+                <pre style="margin: 5px 0; white-space: pre-wrap;">${data}</pre>
+            `;
+            
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+        
+        function clearWsMessages() {
+            document.getElementById('wsMessages').innerHTML = '';
+        }
+        
+        // SSE functionality
+        let sseConnections = new Map();
+        
+        function connectSSE(streamType, intervalMs) {
+            // Disconnect existing connection of same type
+            if (sseConnections.has(streamType)) {
+                sseConnections.get(streamType).close();
+                sseConnections.delete(streamType);
+            }
+            
+            let url = `/api/sse?stream_type=${streamType}`;
+            if (intervalMs) {
+                url += `&interval_ms=${intervalMs}`;
+            }
+            
+            const eventSource = new EventSource(url);
+            sseConnections.set(streamType, {
+                connection: eventSource,
+                startTime: new Date(),
+                messageCount: 0,
+                intervalMs: intervalMs || 'default'
+            });
+            
+            eventSource.onopen = function() {
+                updateSSEConnectionsDisplay();
+                if (streamType === 'events') {
+                    updateSSEStatus(`Connected to ${sseConnections.size} stream(s)`, 'success');
+                    addEventMessage('system', `Connected to ${streamType} event stream`);
+                } else {
+                    updateSSEStatus(`Connected to ${sseConnections.size} stream(s)`, 'success');
+                    addSSEMessage(streamType, `Connected to ${streamType} stream`);
+                }
+            };
+            
+            eventSource.onmessage = function(event) {
+                const connInfo = sseConnections.get(streamType);
+                if (connInfo) {
+                    connInfo.messageCount++;
+                    updateSSEConnectionsDisplay();
+                }
+                
+                try {
+                    const data = JSON.parse(event.data);
+                    if (streamType === 'events') {
+                        addEventMessage('live', JSON.stringify(data, null, 2));
+                    } else {
+                        addSSEMessage(streamType, JSON.stringify(data, null, 2));
+                    }
+                } catch (e) {
+                    if (streamType === 'events') {
+                        addEventMessage('live', event.data);
+                    } else {
+                        addSSEMessage(streamType, event.data);
+                    }
+                }
+            };
+            
+            // Specific event listeners for different stream types
+            eventSource.addEventListener('system-stats', function(event) {
+                const data = JSON.parse(event.data);
+                addSSEMessage('stats', JSON.stringify(data, null, 2));
+            });
+            
+            eventSource.addEventListener('data-update', function(event) {
+                const data = JSON.parse(event.data);
+                addSSEMessage('data', JSON.stringify(data, null, 2));
+            });
+            
+            eventSource.addEventListener('log-entry', function(event) {
+                const data = JSON.parse(event.data);
+                addSSEMessage('logs', JSON.stringify(data, null, 2));
+            });
+            
+            eventSource.addEventListener('metrics-update', function(event) {
+                const data = JSON.parse(event.data);
+                addSSEMessage('metrics', JSON.stringify(data, null, 2));
+            });
+            
+            eventSource.addEventListener('jsonrpc-event', function(event) {
+                const data = JSON.parse(event.data);
+                addEventMessage('jsonrpc', JSON.stringify(data, null, 2));
+            });
+            
+            eventSource.onerror = function(error) {
+                updateSSEStatus(`Error in connections`, 'error');
+                if (streamType === 'events') {
+                    addEventMessage('error', `Error in ${streamType} stream`);
+                } else {
+                    addSSEMessage('error', `Error in ${streamType} stream`);
+                }
+                sseConnections.delete(streamType);
+                updateSSEConnectionsDisplay();
+            };
+        }
+        
+        function disconnectAllSSE() {
+            sseConnections.forEach((connInfo, streamType) => {
+                connInfo.connection.close();
+                if (streamType === 'events') {
+                    addEventMessage('system', `Disconnected from ${streamType} stream`);
+                } else {
+                    addSSEMessage('system', `Disconnected from ${streamType} stream`);
+                }
+            });
+            sseConnections.clear();
+            updateSSEStatus('All SSE connections closed', 'info');
+            updateSSEConnectionsDisplay();
+        }
+        
+        function updateSSEConnectionsDisplay() {
+            const connectionsDiv = document.getElementById('sseConnections');
+            
+            if (sseConnections.size === 0) {
+                connectionsDiv.innerHTML = '<div style="color: #808080; text-align: center; margin-top: 100px;">No active SSE connections</div>';
+                return;
+            }
+            
+            let html = '';
+            sseConnections.forEach((connInfo, streamType) => {
+                const duration = Math.floor((new Date() - connInfo.startTime) / 1000);
+                const colorClass = streamType === 'events' ? '#ffcc00' : 
+                                 streamType === 'stats' ? '#4ec9b0' :
+                                 streamType === 'data' ? '#569cd6' :
+                                 streamType === 'logs' ? '#c586c0' : '#f48771';
+                
+                html += `
+                    <div style="background: #2a2a2a; padding: 10px; margin: 5px 0; border-radius: 4px; border-left: 3px solid ${colorClass};">
+                        <div style="font-weight: bold; color: ${colorClass};">${streamType.toUpperCase()}</div>
+                        <div style="font-size: 12px; color: #808080;">
+                            Duration: ${duration}s<br>
+                            Messages: ${connInfo.messageCount}<br>
+                            Interval: ${connInfo.intervalMs}ms
+                        </div>
+                        <button onclick="disconnectSSE('${streamType}')" style="background: #f48771; border: none; padding: 2px 6px; margin-top: 5px; border-radius: 2px; color: white; font-size: 10px; cursor: pointer;">Disconnect</button>
+                    </div>
+                `;
+            });
+            
+            connectionsDiv.innerHTML = html;
+        }
+        
+        function disconnectSSE(streamType) {
+            if (sseConnections.has(streamType)) {
+                const connInfo = sseConnections.get(streamType);
+                connInfo.connection.close();
+                sseConnections.delete(streamType);
+                
+                if (streamType === 'events') {
+                    addEventMessage('system', `Disconnected from ${streamType} stream`);
+                } else {
+                    addSSEMessage('system', `Disconnected from ${streamType} stream`);
+                }
+                
+                updateSSEConnectionsDisplay();
+                updateSSEStatus(sseConnections.size > 0 ? `Connected to ${sseConnections.size} stream(s)` : 'All connections closed', 
+                              sseConnections.size > 0 ? 'success' : 'info');
+            }
+        }
+        
+        function updateSSEStatus(status, type) {
+            const statusDiv = document.getElementById('sseStatus');
+            statusDiv.className = `status ${type}`;
+            statusDiv.textContent = `SSE: ${status}`;
+        }
+        
+        function addSSEMessage(type, data) {
+            const messagesDiv = document.getElementById('sseMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'ws-message received';
+            
+            const timestamp = new Date().toLocaleTimeString();
+            const colorClass = type === 'stats' ? '#4ec9b0' :
+                             type === 'data' ? '#569cd6' :
+                             type === 'logs' ? '#c586c0' :
+                             type === 'metrics' ? '#f48771' :
+                             type === 'system' ? '#ffcc00' : '#808080';
+            
+            messageDiv.innerHTML = `
+                <div class="timestamp" style="color: ${colorClass};">${timestamp} - ${type.toUpperCase()}</div>
+                <pre style="margin: 5px 0; white-space: pre-wrap; font-size: 12px; color: #e0e0e0;">${data}</pre>
+            `;
+            
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            
+            // Keep only last 100 messages for SSE
+            while (messagesDiv.children.length > 100) {
+                messagesDiv.removeChild(messagesDiv.firstChild);
+            }
+        }
+        
+        function addEventMessage(type, data) {
+            const eventHistoryDiv = document.getElementById('eventHistory');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'ws-message received';
+            
+            const timestamp = new Date().toLocaleTimeString();
+            const colorClass = type === 'jsonrpc' ? '#4ec9b0' :
+                             type === 'live' ? '#569cd6' :
+                             type === 'system' ? '#ffcc00' :
+                             type === 'error' ? '#f48771' : '#808080';
+            
+            messageDiv.innerHTML = `
+                <div class="timestamp" style="color: ${colorClass};">${timestamp} - ${type.toUpperCase()}</div>
+                <pre style="margin: 5px 0; white-space: pre-wrap; font-size: 11px; color: #e0e0e0;">${data}</pre>
+            `;
+            
+            eventHistoryDiv.appendChild(messageDiv);
+            eventHistoryDiv.scrollTop = eventHistoryDiv.scrollHeight;
+            
+            // Keep only last 50 messages for events
+            while (eventHistoryDiv.children.length > 50) {
+                eventHistoryDiv.removeChild(eventHistoryDiv.firstChild);
+            }
+        }
+        
+        function clearSSEMessages() {
+            document.getElementById('sseMessages').innerHTML = '';
+        }
+        
+        async function refreshEventStats() {
+            try {
+                const response = await fetch('/api/events/stats');
+                const stats = await response.json();
+                
+                const statsDiv = document.getElementById('eventStats');
+                statsDiv.innerHTML = `<pre style="font-size: 12px;">${JSON.stringify(stats, null, 2)}</pre>`;
+            } catch (error) {
+                const statsDiv = document.getElementById('eventStats');
+                statsDiv.innerHTML = `<div style="color: #f48771;">Error: ${error.message}</div>`;
+            }
+        }
+
+        async function loadRecentEvents() {
+            try {
+                const response = await fetch('/api/events/recent');
+                const events = await response.json();
+                
+                const eventHistoryDiv = document.getElementById('eventHistory');
+                eventHistoryDiv.innerHTML = `<pre style="font-size: 12px;">${JSON.stringify(events, null, 2)}</pre>`;
+            } catch (error) {
+                const eventHistoryDiv = document.getElementById('eventHistory');
+                eventHistoryDiv.innerHTML = `<div style="color: #f48771;">Error: ${error.message}</div>`;
+            }
+        }
+
+        function clearEventHistory() {
+            document.getElementById('eventHistory').innerHTML = '';
+        }
+        
+        // Auto-update SSE connections display every 5 seconds
+        setInterval(() => {
+            if (sseConnections.size > 0) {
+                updateSSEConnectionsDisplay();
+            }
+        }, 5000);
+        
+        // Auto-connect WebSocket on page load and initialize data
+        window.addEventListener('load', function() {
+            // connectWebSocket();
+            // Load initial event stats and recent events
+            refreshEventStats();
+            loadRecentEvents();
+            updateSSEConnectionsDisplay();
+        });
+    </script>
+</body>
+</html> 
