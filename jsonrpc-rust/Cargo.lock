@@ -1011,7 +1011,9 @@ dependencies = [
  "tokio-stream",
  "tokio-test",
  "tokio-tungstenite 0.20.1",
+ "tokio-util",
  "trn-rust",
+ "url",
  "uuid",
  "warp",
 ]
@@ -1829,6 +1831,7 @@ checksum = "66a539a9ad6d5d281510d5bd368c973d636c02dbf8a67300bfb6b950696ad7df"
 dependencies = [
  "bytes",
  "futures-core",
+ "futures-io",
  "futures-sink",
  "pin-project-lite",
  "tokio",

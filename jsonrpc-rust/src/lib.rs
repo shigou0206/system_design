@@ -167,13 +167,13 @@ pub mod prelude {
     // Core types
     pub use crate::core::prelude::*;
     
+    // Transport layer (Phase 2)
+    pub use crate::transport::prelude::*;
+    
     // Version constant
     pub use crate::JSONRPC_VERSION;
     
          // Future extensions (will be available in later phases)
-     // #[cfg(feature = "tcp")]
-     // pub use crate::transport::*;
-     
      // pub use crate::protocol::*;
      // pub use crate::extensions::*;
      // pub use crate::convenience::*;
@@ -277,14 +277,8 @@ pub mod info {
     }
 }
 
-// Placeholder modules for future phases (empty implementations for now)
-#[cfg(feature = "tcp")]
-pub mod transport {
-    //! Transport layer abstractions (Phase 2)
-    //! 
-    //! This module will provide concrete implementations of transport protocols
-    //! including TCP, WebSocket, and HTTP transports.
-}
+// Transport layer implementation (Phase 2)
+pub mod transport;
 
 pub mod protocol {
     //! Protocol layer implementation (Phase 3)
