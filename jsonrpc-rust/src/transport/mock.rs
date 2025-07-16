@@ -693,7 +693,7 @@ impl Transport for MockTransport {
         let mut metadata = HashMap::new();
         metadata.insert("protocol".to_string(), "mock".into());
         metadata.insert("deterministic".to_string(), self.config.deterministic.into());
-        metadata.insert("network_latency_ms".to_string(), self.config.network_latency.as_millis().into());
+        metadata.insert("network_latency_ms".to_string(), (self.config.network_latency.as_millis() as u64).into());
         metadata.insert("message_loss_rate".to_string(), self.config.message_loss_rate.into());
         metadata.insert("max_queue_size".to_string(), self.config.max_queue_size.into());
         metadata
