@@ -1,61 +1,72 @@
-//! Storage backends for the event bus system
-//! 
-//! This module provides different storage implementations for events,
-//! from in-memory storage for development to persistent storage for production.
+//! Event storage implementations
 
 pub mod memory;
-
-#[cfg(feature = "persistence")]
 pub mod sqlite;
-
-#[cfg(feature = "persistence")]
 pub mod postgres;
 
+use crate::core::traits::EventStorage;
+use crate::core::EventBusResult;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::core::{EventStorage, EventBusResult};
-use crate::config::StorageConfig;
-
-// Re-export implementations
+// Re-export storage implementations
 pub use memory::MemoryStorage;
-
-#[cfg(feature = "persistence")]
 pub use sqlite::SqliteStorage;
-
-#[cfg(feature = "persistence")]
 pub use postgres::PostgresStorage;
 
-/// Create a storage instance from configuration
-pub async fn create_storage(config: &StorageConfig) -> EventBusResult<Arc<dyn EventStorage>> {
-    match config {
-        StorageConfig::Memory { .. } => {
-            let storage = MemoryStorage::new();
-            storage.initialize().await?;
-            Ok(Arc::new(storage))
-        }
-        
-        #[cfg(feature = "persistence")]
-        StorageConfig::Sqlite { path, .. } => {
-            let database_url = format!("sqlite:{}", path);
-            let storage = SqliteStorage::new(&database_url).await?;
-            storage.initialize().await?;
-            Ok(Arc::new(storage))
-        }
-        
-        #[cfg(feature = "persistence")]
-        StorageConfig::Postgres { url, .. } => {
-            let storage = PostgresStorage::new(url).await?;
-            storage.initialize().await?;
-            Ok(Arc::new(storage))
-        }
-        
-        #[cfg(not(feature = "persistence"))]
-        StorageConfig::Sqlite { .. } | StorageConfig::Postgres { .. } => {
-            Err(crate::core::EventBusError::configuration(
-                "Persistence features not enabled. Enable 'persistence' feature to use SQLite/Postgres storage"
-            ))
-        }
+/// Storage configuration enum
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum StorageConfig {
+    /// In-memory storage (for testing/development)
+    Memory { 
+        max_events: usize 
+    },
+    /// SQLite storage (for single-node deployments)
+    Sqlite { 
+        database_url: String 
+    },
+    /// PostgreSQL storage (for production deployments)
+    Postgres {
+        database_url: String,
+        max_connections: u32,
+        enable_partitioning: bool,
+    },
+}
+
+impl Default for StorageConfig {
+    fn default() -> Self {
+        StorageConfig::Memory { max_events: 10000 }
     }
+}
+
+/// Create a storage instance based on configuration
+pub async fn create_storage(config: &StorageConfig) -> EventBusResult<Arc<dyn EventStorage>> {
+    let storage: Arc<dyn EventStorage> = match config {
+        StorageConfig::Memory { max_events } => {
+            let storage = MemoryStorage::with_limits(*max_events);
+            Arc::new(storage)
+        }
+        StorageConfig::Sqlite { database_url } => {
+            let storage = SqliteStorage::new(database_url).await?;
+            Arc::new(storage)
+        }
+        StorageConfig::Postgres { database_url, max_connections, enable_partitioning } => {
+            let postgres_config = postgres::PostgresConfig {
+                database_url: database_url.clone(),
+                max_connections: *max_connections,
+                enable_partitioning: *enable_partitioning,
+                ..Default::default()
+            };
+            
+            let storage = PostgresStorage::with_config(postgres_config).await?;
+            Arc::new(storage)
+        }
+    };
+    
+    // Initialize the storage
+    storage.initialize().await?;
+    
+    Ok(storage)
 }
 
 /// Storage factory with connection pooling and caching
