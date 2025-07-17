@@ -32,6 +32,9 @@ pub mod config;
 /// Utilities and helpers
 pub mod utils;
 
+/// JSON-RPC server and client implementations
+pub mod jsonrpc;
+
 /// Prelude module for convenient imports
 pub mod prelude {
     // Core types
@@ -48,6 +51,9 @@ pub mod prelude {
     
     // Configuration
     pub use crate::config::{EventBusConfig, EventBusInstance};
+    
+    // JSON-RPC integration
+    pub use crate::jsonrpc::{EventBusRpcServer, EventBusRpcClient, connect_to_eventbus};
     
     // Re-export from dependencies
     pub use jsonrpc_rust::prelude::*;

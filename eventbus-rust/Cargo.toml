@@ -38,7 +38,7 @@ jsonrpc-rust = { path = "../jsonrpc-rust", features = ["tcp"] }
 trn-rust = { path = "../trn-rust" }
 
 # 核心异步运行时
-tokio = { version = "1.0", features = ["macros", "rt-multi-thread", "sync", "time", "io-util"] }
+tokio = { version = "1.0", features = ["macros", "rt-multi-thread", "sync", "time", "io-util", "signal"] }
 tokio-util = { version = "0.7", features = ["codec", "compat"] }
 async-trait = "0.1"
 futures = "0.3"
@@ -90,3 +90,7 @@ tempfile = "3.0"
 [lib]
 name = "eventbus_rust"
 path = "src/lib.rs"
+
+[[bin]]
+name = "eventbus-server"
+path = "src/bin/eventbus-server.rs"
