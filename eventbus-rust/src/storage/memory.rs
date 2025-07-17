@@ -17,6 +17,7 @@ use crate::StorageStats;
 pub struct MemoryStorage {
     events: Arc<RwLock<HashMap<String, Vec<EventEnvelope>>>>,
     rules: Arc<RwLock<HashMap<String, Rule>>>,
+    #[allow(dead_code)]
     max_events_per_topic: usize,
 }
 

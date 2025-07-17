@@ -202,6 +202,31 @@ impl ServiceMetrics {
     fn end_operation(&self) {
         self.current_operations.fetch_sub(1, Ordering::Relaxed);
     }
+    
+    /// Get the total number of events processed
+    pub fn events_processed(&self) -> u64 {
+        self.events_processed.load(Ordering::Relaxed)
+    }
+    
+    /// Get the number of events processed in the last second
+    pub fn events_per_second(&self) -> f64 {
+        self.get_events_per_second()
+    }
+    
+    /// Get the number of active subscriptions
+    pub fn active_subscriptions(&self) -> u64 {
+        self.active_subscriptions.load(Ordering::Relaxed)
+    }
+    
+    /// Get the number of current operations
+    pub fn current_operations(&self) -> u64 {
+        self.current_operations.load(Ordering::Relaxed)
+    }
+    
+    /// Get the total error count
+    pub fn error_count(&self) -> u64 {
+        self.error_count.load(Ordering::Relaxed)
+    }
 }
 
 impl EventBusService {
@@ -850,7 +875,7 @@ impl MultiBusManager {
         let bus = self.buses.get(bus_name)
             .ok_or_else(|| format!("Bus '{}' not found", bus_name))?;
         
-        bus.subscribe(&topic).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+        let _subscription = bus.subscribe(&topic).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
         // For now, return a simple channel - this would need proper implementation
         let (_tx, rx) = tokio::sync::broadcast::channel(1000);
         Ok(rx)
@@ -926,6 +951,26 @@ impl CombinedMetrics {
         
         // Update timestamp
         self.collected_at = chrono::Utc::now();
+    }
+    
+    /// Get total events processed across all buses
+    pub fn total_events_processed(&self) -> u64 {
+        self.totals.events_processed()
+    }
+    
+    /// Get total active subscriptions across all buses
+    pub fn total_active_subscriptions(&self) -> u64 {
+        self.totals.active_subscriptions()
+    }
+    
+    /// Get per-bus metrics iterator
+    pub fn buses(&self) -> impl Iterator<Item = (&String, &ServiceMetrics)> {
+        self.buses.iter()
+    }
+    
+    /// Get metrics for a specific bus
+    pub fn get_bus_metrics(&self, bus_name: &str) -> Option<&ServiceMetrics> {
+        self.buses.get(bus_name)
     }
 }
 

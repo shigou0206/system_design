@@ -316,7 +316,7 @@ impl SqliteStorage {
         // Use timestamp range optimization
         if query.since.is_some() || query.until.is_some() {
             match (query.since, query.until) {
-                (Some(since), Some(until)) => {
+                (Some(_since), Some(_until)) => {
                     sql.push_str(" AND timestamp BETWEEN ? AND ?");
                 }
                 (Some(_), None) => {

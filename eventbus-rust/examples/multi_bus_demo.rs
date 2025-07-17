@@ -8,9 +8,10 @@
 //! 5. Monitor combined metrics
 
 use eventbus_rust::{
-    run_event_bus, MultiBusConfig, ServiceConfig, GlobalConfig,
-    StorageConfig, EventEnvelopeBuilder, Rule, RuleAction,
-    EventPriority, LoggingConfig,
+    run_event_bus, 
+    service::{MultiBusConfig, ServiceConfig, GlobalConfig, LoggingConfig},
+    config::StorageConfig, 
+    core::{EventEnvelopeBuilder, EventPriority, traits::EventBus},
 };
 use serde_json::json;
 use std::collections::HashMap;
@@ -24,7 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let config = create_custom_config();
     
     // Start the event bus system
-    let mut bus_system = run_event_bus(config).await?;
+    let bus_system = run_event_bus(config).await?;
     
     println!("✅ Multi-bus system started with buses: {:?}", bus_system.bus_names());
 
@@ -40,31 +41,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Demo 4: Monitor combined metrics
     demo_metrics(&bus_system).await?;
     
-    // Allow some time for event processing
-    sleep(Duration::from_secs(2)).await;
-    
-    // Get final metrics
-    let metrics = bus_system.get_combined_metrics().await?;
-    println!("\n📊 Final Combined Metrics:");
-    println!("Total events processed: {}", metrics.totals.events_processed);
-    println!("Total EPS: {:.2}", metrics.totals.events_per_second);
-    println!("Total active subscriptions: {}", metrics.totals.active_subscriptions);
-    
-    for (bus_name, bus_metrics) in &metrics.buses {
-        println!("  {}: {} events, {:.2} EPS", 
-                 bus_name, 
-                 bus_metrics.events_processed, 
-                 bus_metrics.events_per_second);
-    }
-    
-    // Graceful shutdown
-    println!("\n🛑 Shutting down event bus system...");
+    println!("🎯 Demo completed successfully!");
+
+    // Gracefully shutdown
     bus_system.stop().await?;
-    println!("✅ System shut down successfully");
     
     Ok(())
 }
 
+
+
+/// Create a custom multi-bus configuration
 fn create_custom_config() -> MultiBusConfig {
     let mut buses = HashMap::new();
     
@@ -72,16 +59,18 @@ fn create_custom_config() -> MultiBusConfig {
     buses.insert(
         "workflows".to_string(),
         ServiceConfig {
+            instance_id: "workflows".to_string(),
             storage: StorageConfig::Sqlite { 
-                database_url: "workflows.db".to_string() 
+                path: "workflows.db".to_string() 
             },
             max_concurrent_emits: 50,
-            max_events_per_second: 500.0,
+            max_events_per_second: Some(500),
             event_buffer_size: 5000,
             subscriber_buffer_size: 500,
             enable_metrics: true,
             enable_graceful_shutdown: true,
             shutdown_timeout_secs: 30,
+            ..ServiceConfig::default()
         }
     );
     
@@ -89,14 +78,16 @@ fn create_custom_config() -> MultiBusConfig {
     buses.insert(
         "users".to_string(),
         ServiceConfig {
-            storage: StorageConfig::Memory { max_events: 20000 },
+            instance_id: "users".to_string(),
+            storage: StorageConfig::Memory,
             max_concurrent_emits: 100,
-            max_events_per_second: 1000.0,
+            max_events_per_second: Some(1000),
             event_buffer_size: 10000,
             subscriber_buffer_size: 1000,
             enable_metrics: true,
             enable_graceful_shutdown: true,
             shutdown_timeout_secs: 30,
+            ..ServiceConfig::default()
         }
     );
     
@@ -104,14 +95,16 @@ fn create_custom_config() -> MultiBusConfig {
     buses.insert(
         "system".to_string(),
         ServiceConfig {
-            storage: StorageConfig::Memory { max_events: 10000 }, // Fallback to memory
+            instance_id: "system".to_string(),
+            storage: StorageConfig::Memory, // Fallback to memory
             max_concurrent_emits: 25,
-            max_events_per_second: 200.0,
+            max_events_per_second: Some(200),
             event_buffer_size: 2000,
             subscriber_buffer_size: 200,
             enable_metrics: true,
             enable_graceful_shutdown: true,
             shutdown_timeout_secs: 30,
+            ..ServiceConfig::default()
         }
     );
 
@@ -132,223 +125,219 @@ fn create_custom_config() -> MultiBusConfig {
     }
 }
 
-async fn demo_basic_events(bus_system: &eventbus_rust::MultiBusManager) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    println!("\n🔥 Demo 1: Basic Event Emission");
+/// Demo basic event emission to different buses
+async fn demo_basic_events(bus_system: &eventbus_rust::service::MultiBusManager) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    println!("\n📡 Demo 1: Basic Event Emission");
     
-    // Emit to default bus (workflows)
-    let event = EventEnvelopeBuilder::new()
-        .topic("workflow.start")
-        .payload_json(json!({
-            "workflow_id": "wf_123",
-            "user_id": "user_456",
-            "action": "deployment"
+    // Get bus instances
+    let workflows_bus = bus_system.get_bus("workflows").unwrap();
+    let users_bus = bus_system.get_bus("users").unwrap();
+    let system_bus = bus_system.get_bus("system").unwrap();
+    
+    // Emit workflow events
+    let workflow_event = EventEnvelopeBuilder::new()
+        .topic("workflow.started")
+        .source_trn("trn:user:admin:service:workflow_manager")
+        .metadata(json!({
+            "workflow_id": "wf_12345",
+            "user_id": "user_789",
+            "type": "data_processing"
         }))
-        .metadata("source", "api")
         .priority(EventPriority::High)
-        .now()
         .build()?;
     
-    bus_system.emit(event).await?;
-    println!("✅ Emitted workflow event to default bus");
+    workflows_bus.emit(workflow_event).await?;
+    println!("  ✅ Workflow event emitted");
     
-    // Emit to specific bus (users)
-    let user_event = EventEnvelopeBuilder::user_event(
-        "alice",
-        "login",
-        json!({
-            "timestamp": chrono::Utc::now(),
-            "ip": "192.168.1.100",
-            "user_agent": "Mozilla/5.0..."
-        })
-    )?.build()?;
+    // Emit user events
+    let user_event = EventEnvelopeBuilder::new()
+        .topic("user.login")
+        .source_trn("trn:user:alice:service:auth")
+        .metadata(json!({
+            "user_id": "alice",
+            "session_id": "sess_456",
+            "ip_address": "192.168.1.100"
+        }))
+        .build()?;
     
-    bus_system.emit_to_bus("users", user_event).await?;
-    println!("✅ Emitted user event to users bus");
+    users_bus.emit(user_event).await?;
+    println!("  ✅ User event emitted");
     
-    // Emit system event
-    let system_event = EventEnvelopeBuilder::system_event(
-        "health",
-        json!({
-            "status": "healthy",
-            "memory_usage": 85.2,
-            "cpu_usage": 23.1
-        })
-    )?.build()?;
+    // Emit system events
+    let system_event = EventEnvelopeBuilder::new()
+        .topic("system.health")
+        .source_trn("trn:system:monitor:service:health_check")
+        .metadata(json!({
+            "cpu_usage": 45.2,
+            "memory_usage": 67.8,
+            "disk_usage": 23.1
+        }))
+        .priority(EventPriority::Low)
+        .build()?;
     
-    bus_system.emit_to_bus("system", system_event).await?;
-    println!("✅ Emitted system event to system bus");
-    
-    Ok(())
-}
-
-async fn demo_event_builder(bus_system: &eventbus_rust::MultiBusManager) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    println!("\n🏗️ Demo 2: EventEnvelopeBuilder Usage");
-    
-    // Workflow event with full metadata
-    let workflow_event = EventEnvelopeBuilder::workflow_event(
-        "wf_789",
-        "step.completed",
-        json!({
-            "step_id": "step_001",
-            "duration_ms": 1234,
-            "result": "success"
-        })
-    )?
-    .source_trn("trn:user:alice:workflow:data-pipeline:v1.0")
-    .target_trn("trn:system:scheduler:tool:task-manager:v2.0")
-    .correlation_id("corr_xyz_789")
-    .sequence_number(42)
-    .metadata("environment", "production")
-    .metadata("region", "us-west-2")
-    .build()?;
-    
-    bus_system.emit_to_bus("workflows", workflow_event).await?;
-    println!("✅ Emitted complex workflow event");
-    
-    // Error event
-    let error_event = EventEnvelopeBuilder::error_event(
-        "database",
-        json!({
-            "error_type": "connection_timeout",
-            "message": "Failed to connect to database after 30s",
-            "stack_trace": "...",
-            "recovery_action": "retry_with_backoff"
-        })
-    )?
-    .correlation_id("corr_error_001")
-    .critical_priority()
-    .build()?;
-    
-    bus_system.emit_to_bus("system", error_event).await?;
-    println!("✅ Emitted critical error event");
-    
-    // Metric event
-    let metric_event = EventEnvelopeBuilder::metric_event(
-        "response_time",
-        json!({
-            "value": 156.7,
-            "unit": "ms",
-            "endpoint": "/api/users",
-            "status_code": 200
-        })
-    )?
-    .metadata("service", "user-api")
-    .low_priority()
-    .build()?;
-    
-    bus_system.emit_to_bus("system", metric_event).await?;
-    println!("✅ Emitted metric event");
+    system_bus.emit(system_event).await?;
+    println!("  ✅ System event emitted");
     
     Ok(())
 }
 
-async fn demo_subscriptions(bus_system: &eventbus_rust::MultiBusManager) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    println!("\n📡 Demo 3: Event Subscriptions");
+/// Demo EventEnvelopeBuilder for creating different event types
+async fn demo_event_builder(bus_system: &eventbus_rust::service::MultiBusManager) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    println!("\n🏗️  Demo 2: EventEnvelopeBuilder");
+    
+    let workflows_bus = bus_system.get_bus("workflows").unwrap();
+    
+    // Business event with correlation
+    let business_event = EventEnvelopeBuilder::new()
+        .topic("order.processed")
+        .source_trn("trn:user:customer:service:orders")
+        .correlation_id("order_corr_123")
+        .metadata(json!({
+            "order_id": "ord_98765",
+            "customer_id": "cust_555",
+            "amount": 129.99,
+            "items": [
+                {"sku": "ITEM001", "quantity": 2},
+                {"sku": "ITEM002", "quantity": 1}
+            ]
+        }))
+        .priority(EventPriority::High)
+        .build()?;
+    
+    workflows_bus.emit(business_event).await?;
+    println!("  ✅ Business event with correlation emitted");
+    
+    // Error event with high priority
+    let error_event = EventEnvelopeBuilder::new()
+        .topic("system.error")
+        .source_trn("trn:system:database:service:postgres")
+        .metadata(json!({
+            "error_code": "DB_CONNECTION_TIMEOUT",
+            "error_message": "Failed to connect to database after 30 seconds",
+            "retry_count": 3,
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        }))
+        .priority(EventPriority::Critical)
+        .build()?;
+    
+    workflows_bus.emit(error_event).await?;
+    println!("  ✅ Critical error event emitted");
+    
+    // Batch of related events
+    for i in 1..=5 {
+        let batch_event = EventEnvelopeBuilder::new()
+            .topic("data.batch_processed")
+            .source_trn("trn:system:etl:service:data_processor")
+            .correlation_id("batch_2024_001")
+            .metadata(json!({
+                "batch_id": format!("batch_2024_001_part_{}", i),
+                "records_processed": 1000 * i,
+                "processing_time_ms": 250 + (i * 50),
+                "part_number": i,
+                "total_parts": 5
+            }))
+            .build()?;
+        
+        workflows_bus.emit(batch_event).await?;
+    }
+    println!("  ✅ Batch processing events emitted");
+    
+    Ok(())
+}
+
+/// Demo subscription to events from different buses
+async fn demo_subscriptions(bus_system: &eventbus_rust::service::MultiBusManager) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    println!("\n📻 Demo 3: Event Subscriptions");
+    
+    let workflows_bus = bus_system.get_bus("workflows").unwrap();
+    let users_bus = bus_system.get_bus("users").unwrap();
     
     // Subscribe to workflow events
-    let mut workflow_receiver = bus_system.subscribe_to_bus("workflows", "workflow.*".to_string()).await?;
+    let topic = "workflow.*";
+    println!("  📡 Subscribing to '{}'", topic);
     
-    // Subscribe to user events  
-    let mut user_receiver = bus_system.subscribe_to_bus("users", "user.*".to_string()).await?;
+    // Note: In a real application, you would handle the subscription stream
+    // For demo purposes, we'll just show that subscription is possible
+    let _subscription_result = workflows_bus.subscribe(&topic).await;
     
-    // Subscribe to system errors
-    let mut error_receiver = bus_system.subscribe_to_bus("system", "error.*".to_string()).await?;
+    // Emit some test events for the subscription
+    let workflow_complete_event = EventEnvelopeBuilder::new()
+        .topic("workflow.completed")
+        .source_trn("trn:user:system:service:workflow_engine")
+        .metadata(json!({
+            "workflow_id": "wf_12345",
+            "execution_time_ms": 45000,
+            "status": "success",
+            "output_size_bytes": 2048
+        }))
+        .build()?;
     
-    println!("✅ Set up subscriptions to multiple buses");
+    workflows_bus.emit(workflow_complete_event).await?;
+    println!("  ✅ Workflow completion event emitted for subscription");
     
-    // Emit some test events
-    let test_events = vec![
-        ("workflows", EventEnvelopeBuilder::new()
-            .topic("workflow.test")
-            .payload_json(json!({"test": "workflow"}))
-            .build()?),
-        ("users", EventEnvelopeBuilder::new()
-            .topic("user.test") 
-            .payload_json(json!({"test": "user"}))
-            .build()?),
-        ("system", EventEnvelopeBuilder::new()
-            .topic("error.test")
-            .payload_json(json!({"test": "error"}))
-            .build()?),
-    ];
+    // Subscribe to user events
+    let user_topic = "user.login";
+    println!("  📡 Subscribing to '{}'", user_topic);
+    let _user_subscription = users_bus.subscribe(&user_topic).await;
     
-    for (bus_name, event) in test_events {
-        bus_system.emit_to_bus(bus_name, event).await?;
-    }
+    let user_login_event = EventEnvelopeBuilder::new()
+        .topic("user.login")
+        .source_trn("trn:user:bob:service:mobile_app")
+        .metadata(json!({
+            "user_id": "bob",
+            "device_type": "mobile",
+            "app_version": "2.1.4",
+            "login_method": "oauth_google"
+        }))
+        .build()?;
     
-    // Try to receive events (with timeout)
-    println!("🔍 Listening for events...");
-    
-    let timeout_duration = Duration::from_millis(500);
-    
-    tokio::select! {
-        result = workflow_receiver.recv() => {
-            if let Ok(event) = result {
-                println!("📨 Received workflow event: {}", event.topic);
-            }
-        }
-        _ = sleep(timeout_duration) => {}
-    }
-    
-    tokio::select! {
-        result = user_receiver.recv() => {
-            if let Ok(event) = result {
-                println!("📨 Received user event: {}", event.topic);
-            }
-        }
-        _ = sleep(timeout_duration) => {}
-    }
-    
-    tokio::select! {
-        result = error_receiver.recv() => {
-            if let Ok(event) = result {
-                println!("📨 Received error event: {}", event.topic);
-            }
-        }
-        _ = sleep(timeout_duration) => {}
-    }
+    users_bus.emit(user_login_event).await?;
+    println!("  ✅ User login event emitted for subscription");
     
     Ok(())
 }
 
-async fn demo_metrics(bus_system: &eventbus_rust::MultiBusManager) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    println!("\n📊 Demo 4: Metrics Monitoring");
+/// Demo metrics monitoring across multiple buses
+async fn demo_metrics(bus_system: &eventbus_rust::service::MultiBusManager) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    println!("\n📊 Demo 4: Multi-Bus Metrics");
     
     // Get initial metrics
     let initial_metrics = bus_system.get_combined_metrics().await?;
-    println!("📈 Initial metrics collected at: {}", initial_metrics.collected_at);
     
-    // Emit a burst of events to see metrics change
-    for i in 0..10 {
-        let event = EventEnvelopeBuilder::new()
-            .topic(format!("test.batch.{}", i))
-            .payload_json(json!({"batch_id": i, "timestamp": chrono::Utc::now()}))
-            .build()?;
-        
-        // Distribute across buses
-        let bus_name = match i % 3 {
-            0 => "workflows",
-            1 => "users", 
-            _ => "system",
-        };
-        
-        bus_system.emit_to_bus(bus_name, event).await?;
+    // Emit events to each bus
+    for bus_name in ["workflows", "users", "system"] {
+        if let Some(bus) = bus_system.get_bus(bus_name) {
+            for i in 1..=10 {
+                let event = EventEnvelopeBuilder::new()
+                    .topic(&format!("{}.test_event", bus_name))
+                    .source_trn(&format!("trn:test:{}:service:demo", bus_name))
+                    .metadata(json!({
+                        "test_id": i,
+                        "bus": bus_name
+                    }))
+                    .build()?;
+                
+                bus.emit(event).await?;
+            }
+        }
     }
     
-    // Wait a bit for processing
+    // Wait a moment for processing
     sleep(Duration::from_millis(100)).await;
     
     // Get updated metrics
     let updated_metrics = bus_system.get_combined_metrics().await?;
-    println!("📈 Updated metrics collected at: {}", updated_metrics.collected_at);
-    println!("📊 Metrics comparison:");
-    println!("  Events processed: {} -> {}", 
-             initial_metrics.totals.events_processed,
-             updated_metrics.totals.events_processed);
     
-    // Show per-bus breakdown
-    for (bus_name, metrics) in &updated_metrics.buses {
-        println!("  📋 {}: {} events processed", bus_name, metrics.events_processed);
+    println!("  📈 Metrics Comparison:");
+    println!("     Initial events processed: {}", 
+             initial_metrics.total_events_processed());
+    println!("     Updated events processed: {}", 
+             updated_metrics.total_events_processed());
+    
+    for bus_name in ["workflows", "users", "system"] {
+        if let Some(metrics) = updated_metrics.get_bus_metrics(bus_name) {
+            println!("  📋 {}: {} events processed", bus_name, metrics.events_processed());
+        }
     }
     
     Ok(())

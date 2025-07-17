@@ -233,15 +233,15 @@ pub async fn create_single_event_bus() -> Result<service::EventBusService, Box<d
 /// # Examples
 /// 
 /// ```rust,no_run
-/// use eventbus_rust::{create_event_bus_with_config, service::ServiceConfig, storage::StorageConfig};
+/// use eventbus_rust::{create_event_bus_with_config, service::ServiceConfig, config::StorageConfig};
 /// 
 /// #[tokio::main]
 /// async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 ///     let config = ServiceConfig {
-///         storage: StorageConfig::Memory { max_events: 10000 },
+///         storage: StorageConfig::Memory,
 ///         max_concurrent_emits: 50,
-///         max_events_per_second: 500.0,
-///         ..Default::default()
+///         max_events_per_second: Some(500),
+///         ..ServiceConfig::default()
 ///     };
 ///     
 ///     let bus = create_event_bus_with_config(config).await?;

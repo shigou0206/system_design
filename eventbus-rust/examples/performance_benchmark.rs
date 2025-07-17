@@ -4,14 +4,14 @@
 //! batch processing, storage backends, and monitoring capabilities.
 
 use eventbus_rust::prelude::*;
-use eventbus_rust::service::{ServiceConfig, AdvancedMetrics};
-use eventbus_rust::storage::{StorageConfig, sqlite::SqliteStorage, postgres::PostgresStorage};
+use eventbus_rust::service::ServiceConfig;
+use eventbus_rust::config::StorageConfig;
 use serde_json::json;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::time::sleep;
 
 #[tokio::main]
-async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+async fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Initialize tracing for performance monitoring
     tracing_subscriber::fmt::init();
     
@@ -31,394 +31,307 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         }
     }
     
-    // Run PostgreSQL benchmarks if available
-    if std::env::var("POSTGRES_URL").is_ok() {
-        println!("\n📊 PostgreSQL Performance Tests");
-        for &event_count in &event_counts {
-            for &batch_size in &batch_sizes {
-                if event_count >= batch_size {
-                    run_postgres_benchmark(event_count, batch_size).await?;
-                }
-            }
-        }
+    // Run PostgreSQL benchmarks (if available)
+    println!("\n🐘 PostgreSQL Performance Tests");
+    if let Ok(postgres_url) = std::env::var("DATABASE_URL") {
+        run_postgres_benchmark(&postgres_url).await?;
     } else {
-        println!("\n⚠️ PostgreSQL benchmarks skipped (POSTGRES_URL not set)");
+        println!("Skipping PostgreSQL tests - DATABASE_URL not set");
     }
     
-    // Run memory vs storage comparison
-    println!("\n🔄 Memory vs Storage Comparison");
-    run_storage_comparison().await?;
+    // Run comparative tests
+    println!("\n⚡ Storage Comparison Tests");
+    run_storage_comparison_test().await?;
     
-    // Run throughput stress test
-    println!("\n⚡ Throughput Stress Test");
-    run_throughput_stress_test().await?;
+    // Run stress test
+    println!("\n🔥 High-Load Stress Test");
+    run_stress_test().await?;
     
-    // Run latency measurement test
-    println!("\n⏱️ Latency Measurement Test");
-    run_latency_test().await?;
+    // Run latency tests
+    println!("\n⏱️  Latency Performance Tests");
+    run_latency_tests().await?;
     
-    println!("\n✅ Performance benchmarks completed!");
-    
+    println!("\n✅ All benchmark tests completed!");
     Ok(())
 }
 
-/// Run SQLite performance benchmark
-async fn run_sqlite_benchmark(event_count: usize, batch_size: usize) -> std::result::Result<(), Box<dyn std::error::Error>> {
-    let db_path = format!("benchmark_sqlite_{}_{}.db", event_count, batch_size);
+/// Run SQLite-specific performance benchmarks
+async fn run_sqlite_benchmark(event_count: usize, batch_size: usize) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let db_path = temp_dir.path().join(format!("bench_{}_{}_{}.db", event_count, batch_size, chrono::Utc::now().timestamp()));
     
-    // Clean up previous test database
-    let _ = std::fs::remove_file(&db_path);
-    
-    // Create service with SQLite storage
     let config = ServiceConfig {
-        instance_id: format!("sqlite_bench_{}_{}", event_count, batch_size),
+        instance_id: format!("sqlite-bench-{}-{}", event_count, batch_size),
+        batch_size,
         storage: StorageConfig::Sqlite { 
-            database_url: format!("sqlite:{}", db_path) 
+            path: db_path.to_string_lossy().to_string()
         },
-        max_concurrent_emits: 100,
-        batch_size: batch_size,
         enable_metrics: true,
-        ..Default::default()
+        ..ServiceConfig::default()
     };
     
-    let service = EventBusService::with_config(config).await?;
-    
-    // Generate test events
-    let events = generate_test_events(event_count);
-    
-    // Measure batch processing performance
     let start = Instant::now();
+    let service = EventBusService::with_config(config).await?;
+    let setup_time = start.elapsed();
     
-    if batch_size == 1 {
-        // Individual emit
-        for event in events {
-            service.emit(event).await?;
-        }
-    } else {
-        // Batch emit
-        for batch in events.chunks(batch_size) {
-            service.emit_batch(batch.to_vec()).await?;
+    // Emit events
+    let emit_start = Instant::now();
+    for i in 0..event_count {
+        let event = EventEnvelopeBuilder::new()
+            .topic("com.example.benchmark.test")
+            .source_trn("trn:test:source:benchmark")
+            .metadata(json!({
+                "batch": batch_size,
+                "index": i,
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            }))
+            .build()?;
+        
+        service.emit(event).await?;
+        
+        if i % 1000 == 0 && i > 0 {
+            print!(".");
         }
     }
+    let emit_time = emit_start.elapsed();
     
-    let duration = start.elapsed();
-    
-    // Measure query performance
+    // Query events
     let query_start = Instant::now();
-    let results = service.poll(EventQuery::new()).await?;
-    let query_duration = query_start.elapsed();
+    let query = EventQuery::new()
+        .with_topic("com.example.benchmark.test");
+    let events = service.poll(query).await?;
+    let query_time = query_start.elapsed();
     
-    let events_per_second = event_count as f64 / duration.as_secs_f64();
+    let total_time = start.elapsed();
+    let events_per_second = (event_count as f64) / emit_time.as_secs_f64();
     
-    println!(
-        "SQLite | Events: {:>6} | Batch: {:>4} | Insert: {:>8.2}ms | Query: {:>6.2}ms | Rate: {:>8.1} evt/s | Retrieved: {}",
-        event_count,
-        batch_size,
-        duration.as_millis(),
-        query_duration.as_millis(),
-        events_per_second,
-        results.len()
-    );
-    
-    // Clean up
-    service.shutdown().await?;
-    let _ = std::fs::remove_file(&db_path);
+    println!("\n📈 SQLite Benchmark Results (events: {}, batch: {})", event_count, batch_size);
+    println!("  Setup time: {:?}", setup_time);
+    println!("  Emit time: {:?} ({:.2} events/sec)", emit_time, events_per_second);
+    println!("  Query time: {:?} ({} events retrieved)", query_time, events.len());
+    println!("  Total time: {:?}", total_time);
     
     Ok(())
 }
 
-/// Run PostgreSQL performance benchmark
-async fn run_postgres_benchmark(event_count: usize, batch_size: usize) -> std::result::Result<(), Box<dyn std::error::Error>> {
-    let postgres_url = std::env::var("POSTGRES_URL")
-        .unwrap_or_else(|_| "postgresql://localhost/eventbus_benchmark".to_string());
-    
-    // Create service with PostgreSQL storage
+/// Run PostgreSQL-specific performance benchmarks
+async fn run_postgres_benchmark(postgres_url: &str) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let config = ServiceConfig {
-        instance_id: format!("postgres_bench_{}_{}", event_count, batch_size),
+        instance_id: "postgres-bench".to_string(),
+        batch_size: 100,
         storage: StorageConfig::Postgres { 
-            database_url: postgres_url,
-            max_connections: 20,
-            enable_partitioning: false,
+            url: postgres_url.to_string(),
+            pool_size: 20,
         },
-        max_concurrent_emits: 100,
-        batch_size: batch_size,
         enable_metrics: true,
-        ..Default::default()
+        ..ServiceConfig::default()
     };
     
-    let service = EventBusService::with_config(config).await?;
-    
-    // Generate test events
-    let events = generate_test_events(event_count);
-    
-    // Measure batch processing performance
     let start = Instant::now();
+    let service = EventBusService::with_config(config).await?;
+    let setup_time = start.elapsed();
     
-    if batch_size == 1 {
-        // Individual emit
-        for event in events {
-            service.emit(event).await?;
-        }
-    } else {
-        // Batch emit
-        for batch in events.chunks(batch_size) {
-            service.emit_batch(batch.to_vec()).await?;
-        }
+    let event_count = 10000;
+    
+    // Emit events
+    let emit_start = Instant::now();
+    for i in 0..event_count {
+        let event = EventEnvelopeBuilder::new()
+            .topic("com.example.postgres.test")
+            .source_trn("trn:test:source:postgres")
+            .metadata(json!({
+                "index": i,
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            }))
+            .build()?;
+        
+        service.emit(event).await?;
     }
+    let emit_time = emit_start.elapsed();
     
-    let duration = start.elapsed();
+    let events_per_second = (event_count as f64) / emit_time.as_secs_f64();
     
-    // Measure query performance
-    let query_start = Instant::now();
-    let results = service.poll(EventQuery::new()).await?;
-    let query_duration = query_start.elapsed();
-    
-    let events_per_second = event_count as f64 / duration.as_secs_f64();
-    
-    println!(
-        "PostgreSQL | Events: {:>6} | Batch: {:>4} | Insert: {:>8.2}ms | Query: {:>6.2}ms | Rate: {:>8.1} evt/s | Retrieved: {}",
-        event_count,
-        batch_size,
-        duration.as_millis(),
-        query_duration.as_millis(),
-        events_per_second,
-        results.len()
-    );
-    
-    // Clean up
-    service.shutdown().await?;
+    println!("\n🐘 PostgreSQL Benchmark Results");
+    println!("  Setup time: {:?}", setup_time);
+    println!("  Emit time: {:?} ({:.2} events/sec)", emit_time, events_per_second);
     
     Ok(())
 }
 
-/// Compare memory vs persistent storage performance
-async fn run_storage_comparison() -> std::result::Result<(), Box<dyn std::error::Error>> {
-    let event_count = 10000;
-    let batch_size = 100;
+/// Compare performance across different storage backends
+async fn run_storage_comparison_test() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let event_count = 5000;
     
-    // Memory storage test
+    // Test memory storage
     let memory_config = ServiceConfig {
-        instance_id: "memory_comparison".to_string(),
-        storage: StorageConfig::Memory { max_events: 50000 },
-        batch_size,
-        ..Default::default()
+        instance_id: "memory-comparison".to_string(),
+        storage: StorageConfig::Memory,
+        enable_metrics: true,
+        ..ServiceConfig::default()
     };
     
     let memory_service = EventBusService::with_config(memory_config).await?;
-    let events = generate_test_events(event_count);
     
     let memory_start = Instant::now();
-    for batch in events.chunks(batch_size) {
-        memory_service.emit_batch(batch.to_vec()).await?;
+    for i in 0..event_count {
+        let event = EventEnvelopeBuilder::new()
+            .topic("com.example.comparison.test")
+            .source_trn("trn:test:source:comparison")
+            .metadata(json!({"index": i}))
+            .build()?;
+        memory_service.emit(event).await?;
     }
-    let memory_duration = memory_start.elapsed();
-    memory_service.shutdown().await?;
+    let memory_time = memory_start.elapsed();
     
-    // SQLite storage test
+    // Test SQLite storage
+    let temp_dir = tempfile::tempdir().unwrap();
+    let db_path = temp_dir.path().join("comparison_test.db");
+    
     let sqlite_config = ServiceConfig {
-        instance_id: "sqlite_comparison".to_string(),
+        instance_id: "sqlite-comparison".to_string(),
         storage: StorageConfig::Sqlite { 
-            database_url: "sqlite:comparison_test.db".to_string() 
+            path: db_path.to_string_lossy().to_string()
         },
-        batch_size,
-        ..Default::default()
+        enable_metrics: true,
+        ..ServiceConfig::default()
     };
     
     let sqlite_service = EventBusService::with_config(sqlite_config).await?;
-    let events = generate_test_events(event_count);
     
     let sqlite_start = Instant::now();
-    for batch in events.chunks(batch_size) {
-        sqlite_service.emit_batch(batch.to_vec()).await?;
+    for i in 0..event_count {
+        let event = EventEnvelopeBuilder::new()
+            .topic("com.example.comparison.test")
+            .source_trn("trn:test:source:comparison")
+            .metadata(json!({"index": i}))
+            .build()?;
+        sqlite_service.emit(event).await?;
     }
-    let sqlite_duration = sqlite_start.elapsed();
-    sqlite_service.shutdown().await?;
+    let sqlite_time = sqlite_start.elapsed();
     
-    println!(
-        "Storage Comparison | Events: {} | Memory: {:.2}ms | SQLite: {:.2}ms | Ratio: {:.2}x",
-        event_count,
-        memory_duration.as_millis(),
-        sqlite_duration.as_millis(),
-        sqlite_duration.as_secs_f64() / memory_duration.as_secs_f64()
-    );
+    let memory_eps = (event_count as f64) / memory_time.as_secs_f64();
+    let sqlite_eps = (event_count as f64) / sqlite_time.as_secs_f64();
     
-    // Clean up
-    let _ = std::fs::remove_file("comparison_test.db");
+    println!("\n⚡ Storage Comparison Results ({} events)", event_count);
+    println!("  Memory: {:?} ({:.2} events/sec)", memory_time, memory_eps);
+    println!("  SQLite: {:?} ({:.2} events/sec)", sqlite_time, sqlite_eps);
+    println!("  Speed ratio: {:.2}x (memory vs sqlite)", memory_eps / sqlite_eps);
     
     Ok(())
 }
 
-/// Run throughput stress test with high concurrency
-async fn run_throughput_stress_test() -> std::result::Result<(), Box<dyn std::error::Error>> {
+/// Run high-load stress test
+async fn run_stress_test() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let config = ServiceConfig {
-        instance_id: "throughput_stress".to_string(),
-        storage: StorageConfig::Memory { max_events: 100000 },
-        max_concurrent_emits: 1000,
-        max_events_per_second: None, // Remove rate limiting
-        batch_size: 50,
-        ..Default::default()
+        instance_id: "stress-test".to_string(),
+        max_concurrent_emits: 200,
+        storage: StorageConfig::Memory,
+        enable_metrics: true,
+        ..ServiceConfig::default()
     };
     
     let service = EventBusService::with_config(config).await?;
-    
-    // Run concurrent producers
-    let num_producers = 10;
-    let events_per_producer = 1000;
+    let service = Arc::new(service);
     
     let start = Instant::now();
+    let concurrent_tasks = 50;
+    let events_per_task = 1000;
     
     let mut handles = Vec::new();
-    for i in 0..num_producers {
+    
+    for task_id in 0..concurrent_tasks {
         let service_clone = service.clone();
         let handle = tokio::spawn(async move {
-            for j in 0..events_per_producer {
-                let event = EventEnvelope::new(
-                    format!("stress.producer.{}", i),
-                    json!({
-                        "producer_id": i,
-                        "event_num": j,
-                        "timestamp": chrono::Utc::now().timestamp(),
-                        "data": format!("test_data_{}", j)
-                    })
-                );
+            for i in 0..events_per_task {
+                let event = EventEnvelopeBuilder::new()
+                    .topic("com.example.stress.test")
+                    .source_trn(&format!("trn:test:source:stress:task:{}", task_id))
+                    .metadata(json!({
+                        "task_id": task_id,
+                        "event_id": i
+                    }))
+                    .build();
                 
-                if let Err(e) = service_clone.emit(event).await {
-                    eprintln!("Failed to emit event: {}", e);
+                match event {
+                    Ok(event) => {
+                        if let Err(e) = service_clone.emit(event).await {
+                            eprintln!("Error in task {}: {}", task_id, e);
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("Error building event in task {}: {}", task_id, e);
+                    }
                 }
             }
         });
         handles.push(handle);
     }
     
-    // Wait for all producers to complete
+    // Wait for all tasks to complete
     for handle in handles {
-        handle.await?;
+        handle.await.unwrap();
     }
     
-    let duration = start.elapsed();
-    let total_events = num_producers * events_per_producer;
-    let events_per_second = total_events as f64 / duration.as_secs_f64();
+    let total_time = start.elapsed();
+    let total_events = concurrent_tasks * events_per_task;
+    let total_eps = (total_events as f64) / total_time.as_secs_f64();
     
-    println!(
-        "Stress Test | Producers: {} | Events: {} | Duration: {:.2}s | Throughput: {:.1} evt/s",
-        num_producers,
-        total_events,
-        duration.as_secs_f64(),
-        events_per_second
-    );
-    
-    service.shutdown().await?;
+    println!("\n🔥 Stress Test Results");
+    println!("  Concurrent tasks: {}", concurrent_tasks);
+    println!("  Events per task: {}", events_per_task);
+    println!("  Total events: {}", total_events);
+    println!("  Total time: {:?}", total_time);
+    println!("  Throughput: {:.2} events/sec", total_eps);
     
     Ok(())
 }
 
-/// Measure end-to-end latency with different event sizes
-async fn run_latency_test() -> std::result::Result<(), Box<dyn std::error::Error>> {
+/// Test latency performance with different payload sizes
+async fn run_latency_tests() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let config = ServiceConfig {
-        instance_id: "latency_test".to_string(),
-        storage: StorageConfig::Memory { max_events: 10000 },
-        max_concurrent_emits: 10,
-        ..Default::default()
+        instance_id: "latency-test".to_string(),
+        storage: StorageConfig::Memory,
+        enable_metrics: true,
+        ..ServiceConfig::default()
     };
     
     let service = EventBusService::with_config(config).await?;
     
-    let payload_sizes = vec![
-        ("Small", 100),   // ~100 bytes
-        ("Medium", 1000), // ~1KB
-        ("Large", 10000), // ~10KB
-    ];
+    let payload_sizes = vec![100, 1000, 10000, 100000]; // bytes
+    let iterations = 100;
     
-    for (size_name, payload_size) in payload_sizes {
+    for &payload_size in &payload_sizes {
+        let payload = "x".repeat(payload_size);
         let mut latencies = Vec::new();
         
-        for _ in 0..100 {
-            let large_payload = "x".repeat(payload_size);
-            let event = EventEnvelope::new(
-                "latency.test",
-                json!({
-                    "data": large_payload,
-                    "timestamp": chrono::Utc::now().timestamp()
-                })
-            );
-            
+        for _ in 0..iterations {
             let start = Instant::now();
-            service.emit(event).await?;
-            let latency = start.elapsed();
             
+            let event = EventEnvelopeBuilder::new()
+                .topic("com.example.latency.test")
+                .source_trn("trn:test:source:latency")
+                .metadata(json!({"payload": payload}))
+                .build()?;
+            
+            service.emit(event).await?;
+            
+            let latency = start.elapsed();
             latencies.push(latency);
         }
         
+        // Calculate statistics
         latencies.sort();
-        let p50 = latencies[latencies.len() / 2];
-        let p95 = latencies[(latencies.len() * 95) / 100];
-        let p99 = latencies[(latencies.len() * 99) / 100];
-        let avg: Duration = latencies.iter().sum::<Duration>() / latencies.len() as u32;
+        let avg_latency = latencies.iter().sum::<Duration>() / latencies.len() as u32;
+        let p50_latency = latencies[latencies.len() / 2];
+        let p95_latency = latencies[(latencies.len() as f64 * 0.95) as usize];
+        let p99_latency = latencies[(latencies.len() as f64 * 0.99) as usize];
         
-        println!(
-            "Latency {} | Avg: {:.2}ms | P50: {:.2}ms | P95: {:.2}ms | P99: {:.2}ms",
-            size_name,
-            avg.as_micros() as f64 / 1000.0,
-            p50.as_micros() as f64 / 1000.0,
-            p95.as_micros() as f64 / 1000.0,
-            p99.as_micros() as f64 / 1000.0,
-        );
+        println!("\n⏱️  Latency Test Results (payload: {} bytes)", payload_size);
+        println!("  Average: {:?}", avg_latency);
+        println!("  P50: {:?}", p50_latency);
+        println!("  P95: {:?}", p95_latency);
+        println!("  P99: {:?}", p99_latency);
     }
     
-    service.shutdown().await?;
-    
     Ok(())
-}
-
-/// Generate test events with varied content
-fn generate_test_events(count: usize) -> Vec<EventEnvelope> {
-    let topics = vec![
-        "user.login", "user.logout", "order.created", "order.updated", 
-        "payment.processed", "notification.sent", "system.health", "metrics.cpu"
-    ];
-    
-    (0..count)
-        .map(|i| {
-            let topic = &topics[i % topics.len()];
-            let mut event = EventEnvelope::new(
-                *topic,
-                json!({
-                    "event_id": i,
-                    "timestamp": chrono::Utc::now().timestamp(),
-                    "user_id": format!("user_{}", i % 1000),
-                    "session_id": format!("session_{}", i % 100),
-                    "data": {
-                        "action": format!("action_{}", i),
-                        "details": format!("Event number {} for testing performance", i),
-                        "metadata": {
-                            "source": "benchmark",
-                            "version": "1.0"
-                        }
-                    }
-                })
-            );
-            
-            // Add TRN information to some events
-            if i % 3 == 0 {
-                event.source_trn = Some(format!("trn:user:user_{}:service:benchmark:v1.0", i % 100));
-                event.target_trn = Some(format!("trn:resource:{}:event_{}:v1.0", topic.replace('.', "_"), i));
-            }
-            
-            // Add correlation IDs to some events
-            if i % 5 == 0 {
-                event.correlation_id = Some(format!("correlation_{}", i / 5));
-            }
-            
-            // Vary priority
-            event.priority = match i % 4 {
-                0 => 50,   // Low
-                1 => 100,  // Normal
-                2 => 150,  // High
-                3 => 200,  // Critical
-                _ => 100,
-            };
-            
-            event
-        })
-        .collect()
 } 

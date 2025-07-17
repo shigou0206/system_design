@@ -29,6 +29,7 @@ struct CompiledTrnPattern {
     regex: Regex,
     
     /// Component patterns
+    #[allow(dead_code)]
     components: TrnPatternComponents,
 }
 
